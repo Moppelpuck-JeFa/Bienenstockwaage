@@ -65,6 +65,16 @@ globals:
     type: float
     restore_value: yes
     initial_value: '0.5'
+  # Temperatur zum Zeitpunkt der Nullpunkt-Kalibrierung.
+  # Wird aktuell NICHT verrechnet - nur festgehalten. Für eine spätere
+  # Temperaturkompensation ist genau dieser Wert der Bezugspunkt
+  # (kg -= (temp_jetzt - calib_temp) * koeffizient). Er lässt sich nachträglich
+  # nicht rekonstruieren, deshalb wird er schon jetzt mitgespeichert - sonst
+  # müsste man später nur deswegen neu kalibrieren.
+  - id: calib_temp
+    type: float
+    restore_value: yes
+    initial_value: 'NAN'
   # Zählt die Minuten seit der letzten Veröffentlichung an HA.
   # Bewusst NICHT restore_value - nach einem Neustart soll sofort
   # wieder gemessen werden, nicht erst nach dem Restintervall.
@@ -73,14 +83,28 @@ globals:
     restore_value: no
     initial_value: '0'
 
+# --- 1-Wire-Bus für den Temperatursensor ---
+# DS18B20 an D5 (GPIO14). D1/D2 sind vom HX711 belegt, D4 wäre GPIO2 und
+# damit ein Boot-Strapping-Pin - deshalb D5.
+# Externer Pull-up 4,7 kΩ zwischen D5 und 3V3 ist zwingend (nicht 5V, die
+# GPIOs des ESP8266 sind nicht 5-V-tolerant).
+one_wire:
+  - platform: gpio
+    pin: D5
+
 # --- HX711 Wägezellen-Verstärker ---
 sensor:
   - platform: hx711
     id: hx711_raw_counts
     # Dieser Sensor ist nur intern - HA bekommt den fertigen Wert weiter unten
     internal: true
-    dout_pin: D1
-    clk_pin: D2
+    # D0 = GPIO16: funktioniert hier, weil der HX711 DOUT aktiv treibt (kein
+    # Pull-up nötig) und der ESPHome-Treiber pollt statt Interrupts zu nutzen -
+    # GPIO16 kann auf dem ESP8266 nämlich keine Interrupts.
+    # ACHTUNG für später: GPIO16 ist der Deep-Sleep-Weckpin. Solange DOUT hier
+    # hängt, ist Batteriebetrieb per Deep Sleep nicht mehr möglich.
+    dout_pin: D0
+    clk_pin: D1
     gain: 128
     # WICHTIG: Der HX711 wird bewusst SCHNELL abgefragt (1s), auch wenn der
     # Messwert in HA nur alle paar Stunden erscheinen soll. Grund: Die
@@ -140,6 +164,25 @@ sensor:
       }
       return gerundet;
 
+  # DS18B20. Läuft BEWUSST auf einem eigenen 60s-Takt statt im Messintervall
+  # der Waage. Zwei Gründe: der Wert ist damit für die Kalibrier-Buttons immer
+  # frisch (max. 60s alt), und für die geplante Driftanalyse ist eine dichtere
+  # Temperaturreihe neben einer groben Gewichtsreihe besser als umgekehrt -
+  # herunterrechnen kann man später immer, nachträglich verdichten nicht.
+  #
+  # Der Wert wird NICHT in die Gewichtsberechnung eingerechnet. Er dient
+  # ausschließlich dazu, erst einmal Daten über die reale Temperaturdrift zu
+  # sammeln. Erst danach entscheiden, ob und wie kompensiert wird.
+  #
+  # Keine "address:" angegeben - bei genau einem Sensor am Bus sucht ESPHome
+  # ihn selbst. Kommt ein zweiter dazu, braucht JEDER eine explizite Adresse
+  # (die Adressen stehen beim Start im Log).
+  - platform: dallas_temp
+    id: temperatur
+    name: "Waage eG Temperatur"
+    update_interval: 60s
+    resolution: 12
+
   # --- Diagnose ---
   # Der gefilterte HX711-Rohwert, so wie ihn die Buttons und die Umrechnung
   # sehen. Der wichtigste Wert zur Fehlersuche: springt der schon ohne Last
@@ -172,6 +215,23 @@ sensor:
         return {};
       }
       return span / id(calib_kg_ref);
+
+  # Temperatur zum Zeitpunkt der Nullpunkt-Kalibrierung. Aktuell rein
+  # informativ - Bezugspunkt für eine mögliche spätere Kompensation.
+  - platform: template
+    id: kalibriert_bei
+    name: "Waage eG Kalibriert bei"
+    icon: "mdi:thermometer-check"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    entity_category: diagnostic
+    update_interval: never
+    lambda: |-
+      if (std::isnan(id(calib_temp))) {
+        return {};
+      }
+      return id(calib_temp);
 
   # Zeigt, mit welchem Referenzgewicht zuletzt WIRKLICH kalibriert wurde.
   # Wichtig zur Unterscheidung von der Number-Entity "Referenzgewicht", die
@@ -215,6 +275,10 @@ button:
           id(rohwert).update();
           id(kalibrierfaktor).update();
           id(kalibriert_mit).update();
+          id(kalibriert_bei).update();
+          // Der DS18B20 laeuft zwar ohnehin im 60s-Takt, aber "Jetzt messen"
+          // soll wirklich alles frisch machen
+          id(temperatur).update();
           ESP_LOGI("waage", "Manuelle Messung ausgeloest");
 
   # Nullt das aktuell aufliegende Gewicht (z. B. Verpackung/Behälter),
@@ -254,6 +318,16 @@ button:
           id(calib_raw_zero) = raw;
           // Ein frisch gesetzter Nullpunkt macht ein altes Tara sinnlos
           id(tare_offset) = 0.0;
+          // Temperatur mitschreiben - Bezugspunkt fuer eine spaetere
+          // Kompensation. Wird aktuell NICHT verrechnet.
+          id(calib_temp) = id(temperatur).state;
+          if (std::isnan(id(calib_temp))) {
+            ESP_LOGW("waage", "Nullpunkt gesetzt, aber ohne Temperatur - "
+                              "DS18B20 liefert (noch) keinen Wert");
+          } else {
+            ESP_LOGI("waage", "Nullpunkt-Temperatur festgehalten: %.1f C",
+                     id(calib_temp));
+          }
           ESP_LOGI("waage", "Nullpunkt gesetzt: roh %.1f (Tara zurueckgesetzt)",
                    raw);
       - component.update: waage_gewicht
@@ -261,6 +335,7 @@ button:
       # Der Nullpunkt geht in den Span ein - der Kalibrierfaktor aendert sich
       # dadurch ebenfalls und muss neu veroeffentlicht werden
       - component.update: kalibrierfaktor
+      - component.update: kalibriert_bei
 
   # Kalibrierung Schritt 2: Referenzgewicht auflegen, dessen Masse vorher in
   # die Number-Entity "Referenzgewicht" eintragen, ~1min warten, dann drücken
@@ -390,6 +465,7 @@ interval:
             id(rohwert).update();
             id(kalibrierfaktor).update();
             id(kalibriert_mit).update();
+            id(kalibriert_bei).update();
           }
 
 # Optional: Web-Server für schnellen Zugriff im Browser ohne Home Assistant

@@ -71,7 +71,15 @@ Nebenbefund: Der Brücken-Offset entspricht nur **1,44 kg** virtueller Last, die
 Brücke ist im Ruhezustand also sehr gut ausgeglichen. Zusammen mit der sauberen
 Empfindlichkeit spricht das dafür, dass die Ring-Verschaltung der vier
 Halbbrücken korrekt ist - abgesehen eben von der vertauschten Signalpolarität.
-- **HX711-Pins am ESP:** `DOUT = D1`, `CLK = D2`
+- **HX711-Pins am ESP:** `DOUT = D0` (GPIO16), `CLK = D1` (GPIO5)
+  - GPIO16 als DOUT geht, weil der HX711 die Leitung aktiv treibt (kein
+    Pull-up nötig) und der ESPHome-Treiber pollt statt Interrupts zu nutzen -
+    GPIO16 kann auf dem ESP8266 nämlich keine Interrupts.
+  - **Folge für später:** GPIO16 ist der Deep-Sleep-Weckpin. Solange DOUT dort
+    hängt, ist Batteriebetrieb per Deep Sleep ausgeschlossen.
+- **Temperatursensor:** DS18B20 an `D5` (GPIO14), 1-Wire, externer Pull-up
+  4,7 kΩ zwischen D5 und **3V3** (nicht 5 V - die ESP8266-GPIOs sind nicht
+  5-V-tolerant). D4 wäre GPIO2 und damit ein Boot-Strapping-Pin, deshalb D5.
 - **Empfohlene Wägezellen-Specs** (noch zu beschaffen):
   - Genauigkeitsklasse **C3 nach OIML R60**, Empfindlichkeit **2mV/V**
   - Vollbrücken-Zellen (4 Anschlüsse: E+/E-/A+/A-), nicht Halbbrücke
@@ -369,12 +377,44 @@ Intervall kostet keine Genauigkeit, ein langes verschlechtert sie nicht.
 - **Logging:** Alle drei Buttons loggen, was sie gespeichert haben - macht die
   reale Kalibrierung nachvollziehbar.
 
+## Temperatur: erst messen, dann entscheiden
+
+Der DS18B20 ist wieder drin - **aber ausschließlich als Messwert, ohne jede
+Korrekturrechnung**. Begründung: Die verbauten YZC-161 sind nicht
+C3-klassifiziert, ihre Nullpunktdrift dürfte grob bei 0,2-1,2 kg über einen
+Tagesgang von 20-30 K liegen. Das ist bei 0,1 kg Auflösung erheblich und liegt
+genau im Signalband, das interessiert (ein mäßiger Trachttag bringt auch nur
+ein paar hundert Gramm).
+
+Ein geratener Koeffizient würde die Sache aber verschlechtern, nicht
+verbessern. Deshalb zuerst ein paar Tage mit **konstanter Last** loggen,
+Gewicht gegen Temperatur auftragen und erst dann entscheiden. Streut die
+Punktwolke breit, dominieren thermische Gradienten zwischen den vier Zellen -
+und die kann ein einzelner Sensor prinzipiell nicht korrigieren.
+
+**`calib_temp` wird schon jetzt mitgespeichert.** Die Nullpunkt-Kalibrierung
+hält die Temperatur fest, bei der sie stattfand (sichtbar als "Waage eG
+Kalibriert bei"). Der Wert lässt sich nachträglich nicht rekonstruieren - ohne
+ihn müsste man später allein deswegen neu kalibrieren. Er ist der Bezugspunkt
+für `kg -= (temp_jetzt - calib_temp) * koeffizient`, falls es dazu kommt.
+
+**Warum der DS18B20 einen eigenen 60s-Takt hat** statt im Messintervall der
+Waage mitzulaufen: So ist der Wert für die Kalibrier-Buttons immer frisch
+(max. 60 s alt), und eine dichte Temperaturreihe neben einer groben
+Gewichtsreihe ist für die Analyse besser als umgekehrt - herunterrechnen kann
+man später immer, nachträglich verdichten nicht.
+
+**Die Alternative, die nichts kostet:** Gewicht täglich zur selben Uhrzeit
+vergleichen (üblich sind die frühen Morgenstunden - stabilste Temperatur, alle
+Bienen im Stock). Damit kürzt sich der Tagesgang weitgehend heraus, ohne
+Sensor und ohne Koeffizient. Für Trachtbilanz und Futterverbrauch reicht das;
+nur für eine belastbare Intraday-Kurve nicht.
+
 ## Explizit NICHT (mehr) enthalten
-- **Temperaturkompensation** wurde eingebaut (DS18B20 auf D4, Number-Entity
-  zum Feintunen des °C-Koeffizienten aus HA) und auf expliziten Wunsch
-  **wieder komplett entfernt**. Falls das nochmal gewünscht wird: Konzept war
-  ein linearer Korrekturfaktor `kg -= (temp_aktuell - temp_bei_kalibrierung) * koeffizient`,
-  Koeffizient über eine `number:`-Template-Entity aus HA einstellbar.
+- **Temperaturkompensation als Rechnung** - der Sensor misst, korrigiert wird
+  nichts. Siehe Abschnitt oben. Die frühere Fassung (DS18B20 auf D4 plus
+  Number-Entity für den Koeffizienten) war auf expliziten Wunsch entfernt
+  worden; der Sensor sitzt jetzt auf D5 und ohne Korrekturterm.
 - Kein `hx711.tare` als Action verwendet (existiert in ESPHome nicht -
   war ein Fehler in einer früheren Version, korrigiert per Lambda+Globals)
 - Physischer Tara-Taster wurde bewusst verworfen, stattdessen virtueller

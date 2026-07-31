@@ -14,6 +14,25 @@ ESP8266 (D1 Mini) mit HX711-Wägezellenverstärker und 4 Wägezellen.
 
 `secrets.yaml` selbst ist per `.gitignore` ausgeschlossen und gehört nicht ins Repo.
 
+## Anschlüsse
+
+| Signal | Pin | GPIO |
+|---|---|---|
+| HX711 DOUT | `D0` | 16 |
+| HX711 CLK | `D1` | 5 |
+| DS18B20 Data | `D5` | 14 |
+
+Der DS18B20 braucht einen **externen Pull-up 4,7 kΩ zwischen D5 und 3V3** —
+parallel zur Datenleitung, nicht in Reihe. Unbedingt gegen **3,3 V**, nicht
+gegen 5 V: die GPIOs des ESP8266 sind nicht 5-V-tolerant. Viele fertige
+DS18B20-Module haben den Widerstand schon an Bord, dann keinen zweiten dazu.
+
+Zwei Pin-Eigenheiten, die man kennen sollte: **GPIO16 (D0)** kann auf dem
+ESP8266 keine Interrupts — für den HX711 egal, weil der ESPHome-Treiber pollt
+und der HX711 die Leitung aktiv treibt. GPIO16 ist aber der Deep-Sleep-Weckpin,
+Batteriebetrieb per Deep Sleep fällt damit weg. **D4 (GPIO2)** wurde für den
+DS18B20 bewusst gemieden, weil es ein Boot-Strapping-Pin ist.
+
 ## Was das Gerät kann
 
 - Gewicht in **kg**, gerundet auf **0,1 kg**
@@ -24,6 +43,8 @@ ESP8266 (D1 Mini) mit HX711-Wägezellenverstärker und 4 Wägezellen.
   überleben einen Neustart
 - **Referenzgewicht frei wählbar** (0,1 bis 50 kg) - je schwerer, desto genauer
 - **Tara-Button**, unabhängig von der Kalibrierung
+- **Temperaturmessung** (DS18B20) — wird bewusst **nicht** in das Gewicht
+  eingerechnet, sondern nur aufgezeichnet. Siehe unten.
 - Fallback-Hotspot, OTA-Updates, Webserver auf Port 80
 
 ## Inbetriebnahme
@@ -137,6 +158,34 @@ also nie sinnvoll reagieren, egal welches Intervall eingestellt ist.
 Nach einem Neustart kommt der erste Wert bereits nach ~1 Minute, unabhängig vom
 eingestellten Intervall - du musst also nicht bis zum Ablauf einer vollen
 Periode warten, um zu sehen, ob das Gerät läuft.
+
+## Temperatur: aufgezeichnet, nicht verrechnet
+
+Die Entity **"Waage eG Temperatur"** misst alle 60 Sekunden. Der Wert geht
+**nicht** in das angezeigte Gewicht ein — bewusst.
+
+Grund: Die verbauten Zellen driften mit der Temperatur, aber wie stark, ist
+unbekannt. Ein geratener Korrekturkoeffizient macht die Messung schlechter,
+nicht besser — und man merkt es nicht, weil das Ergebnis weiter plausibel
+aussieht. Deshalb erst Daten sammeln.
+
+**So kommst du zu den Daten:** Eine konstante, bekannte Last auflegen (ein
+Sack Zucker reicht), Messintervall auf `15` stellen und ein paar Tage laufen
+lassen. Danach in HA Gewicht gegen Temperatur auftragen. Ergibt sich eine
+saubere Gerade, ist ihre Steigung der gesuchte Koeffizient. Streut die
+Punktwolke breit, dominieren thermische Gradienten zwischen den vier Zellen —
+die kann ein einzelner Sensor nicht korrigieren, dann lohnt die Kompensation
+nicht.
+
+Die Diagnose-Entity **"Waage eG Kalibriert bei"** hält fest, bei welcher
+Temperatur zuletzt der Nullpunkt kalibriert wurde. Sie ist der Bezugspunkt für
+eine spätere Korrektur und lässt sich nachträglich nicht rekonstruieren —
+deshalb wird sie schon jetzt mitgeschrieben.
+
+**Die Variante ohne Sensor:** Gewicht immer zur selben Uhrzeit vergleichen,
+am besten vor Sonnenaufgang. Dann ist die Temperatur tagesübergreifend
+ähnlich und alle Bienen sind im Stock. Das kürzt den Tagesgang weitgehend
+heraus und reicht für Trachtbilanz und Futterverbrauch völlig.
 
 ## Fehlersuche: die Waage misst Unsinn
 
