@@ -31,12 +31,14 @@ ESPHome Device Builder Add-on in Home Assistant.
   - **"Waage eG Kalibrieren 0,5kg"** - 500g-Referenzgewicht auflegen, dann drücken
 - **"Waage eG Tara"** - separater Button, nullt nur das aktuell aufliegende
   Gewicht (z. B. Behälter), ändert NICHTS an der Kalibrierung selbst
-- Messintervall **in Home Assistant: alle 6 Stunden** (siehe Abschnitt
-  "Sampling-Strategie" - der HX711 selbst wird bewusst schneller abgefragt)
+- Messintervall **frei aus HA einstellbar** über die Number-Entity
+  "Waage eG Messintervall" (1 min bis 10080 min = 7 Tage, Voreinstellung
+  360 min = 6 h). Siehe Abschnitt "Sampling-Strategie" - der HX711 selbst
+  wird davon unabhängig im Sekundentakt abgefragt.
 - Rausch-Filterung: `median` + `sliding_window_moving_average` auf dem
   rohen HX711-Signal, bevor die Kalibrierrechnung angewendet wird
-- `api.reboot_timeout: 0s` - verhindert unnötige Neustarts, da bei 6h-Intervall
-  zwischendurch mal kurz keine HA-Verbindung bestehen kann
+- `api.reboot_timeout: 0s` - verhindert unnötige Neustarts, da bei langem
+  Messintervall zwischendurch mal kurz keine HA-Verbindung bestehen kann
 - Alle Kalibrierwerte (`calib_raw_zero`, `calib_raw_half`) und der Tara-Offset
   sind `globals` mit `restore_value: yes` - übersteht Neustarts
 
@@ -59,15 +61,51 @@ Fehler, die erst bei der realen Kalibrierung aufgefallen wären:
 **Jetzt:** Der HX711 wird mit `update_interval: 1s` abgefragt und gefiltert
 (Median über 5 Werte → Ausgabe alle 5s, danach gleitender Mittelwert über 12
 dieser Werte ≈ 60s Fenster). Der interne Rohwert ist damit **immer aktuell**
-(max. 5s alt) und gut gemittelt. Die 6h-Taktung sitzt ausschließlich am
-sichtbaren Template-Sensor. Die Buttons brauchen dadurch kein
-`component.update` + `delay` mehr - sie lesen einfach den gefilterten Zustand.
+(max. 5s alt) und gut gemittelt. Die Taktung nach HA ist davon vollständig
+entkoppelt (siehe "Einstellbares Messintervall"). Die Buttons brauchen dadurch
+kein `component.update` + `delay` mehr - sie lesen einfach den gefilterten
+Zustand.
 
 **Bedienhinweis:** Weil ~60s gemittelt wird, gilt für alle drei Buttons:
 erst auflegen/abräumen, **~1 Minute warten**, dann drücken.
 
 Netzbetrieb vorausgesetzt kostet das schnellere Sampling nichts. Bei einem
 späteren Umstieg auf Deep Sleep müsste diese Strategie neu gedacht werden.
+
+## Einstellbares Messintervall (ersetzt das feste 6h)
+
+Das fest kompilierte `update_interval: 6h` ist raus. Stattdessen:
+
+- **Number-Entity "Waage eG Messintervall"** (`platform: template`,
+  `mode: box`, also Zahl eintippen statt Schieberegler), Einheit **Minuten**,
+  Bereich **1 bis 10080** (7 Tage), `restore_value: true`, Voreinstellung
+  **360** - damit verhält sich das Gerät ab Werk wie vorher.
+  `entity_category: config`, landet in HA also bei den Einstellungen und nicht
+  zwischen den Messwerten.
+- **`waage_gewicht` und `waage_uptime` haben `update_interval: never`.**
+  Veröffentlicht wird nur noch, wenn jemand `update()` aufruft.
+- **`interval: 60s`-Block** als Taktgeber: zählt `minuten_seit_messung` hoch
+  und ruft bei Erreichen des eingestellten Werts `id(waage_gewicht).update()`
+  und `id(waage_uptime).update()` auf.
+
+Warum ein Minutenzähler und nicht `millis()`: der Zähler ist trivial
+nachvollziehbar und hat kein Überlaufproblem - `millis()` läuft auf dem ESP8266
+nach ~49 Tagen über, und die Waage soll monatelang durchlaufen.
+
+Zwei bewusste Details:
+
+- **`minuten_seit_messung` ist NICHT `restore_value`.** Nach einem Neustart
+  soll sofort wieder gemessen werden, nicht erst nach dem Restintervall.
+- **Solange noch nie ein Gewicht veröffentlicht wurde** (`isnan` auf
+  `waage_gewicht.state`), misst der Block jede Minute erneut. Dadurch steht
+  nach einem Boot der erste Wert nach ~1 min in HA statt erst nach bis zu
+  7 Tagen. Das ist auch genau der Moment, in dem der 60s-Filter eingeschwungen ist.
+- **`on_value` der Number** setzt den Zähler zurück und misst einmal sofort -
+  so sieht man in HA direkt, dass die Änderung angekommen ist.
+
+Die Entkopplung hat einen angenehmen Nebeneffekt: Das Intervall beeinflusst nur
+noch, wie oft ein Wert nach HA geht, nicht mehr die Messqualität. Ein kurzes
+Intervall kostet keine Genauigkeit, ein langes verschlechtert sie nicht.
 
 ## Weitere Änderungen gegenüber dem ersten Stand
 - **NaN-Schutz:** Vor dem ersten gefilterten Messwert (direkt nach dem Boot)
@@ -115,6 +153,16 @@ späteren Umstieg auf Deep Sleep müsste diese Strategie neu gedacht werden.
     Tara bei 3 kg → 0,0 kg, danach 13 kg brutto → 10,0 kg
   - Filterverhalten gegen `components/sensor/filter.cpp` verifiziert
     (siehe "Sampling-Strategie")
+  - `update()` ist bei beiden Sensoren public aufrufbar: `TemplateSensor` und
+    `UptimeSecondsSensor` erben beide von `PollingComponent`, wo
+    `virtual void update()` im public-Abschnitt steht - `id(...).update()`
+    aus einem Lambda ist damit zulässig
+  - Der `interval:`-Block wurde ebenfalls als C++-Programm minutenweise
+    durchsimuliert: Boot mit noch leerer Number → Messung nach 1 min |
+    360 min → Abstand exakt 360 min | Umstellung auf 15 min im laufenden
+    Betrieb → ab da exakt alle 15 min | Minimum 1 min → jede Minute |
+    Maximum 10080 min über 14 simulierte Tage → exakt 2 Messungen,
+    kein Zählerüberlauf
 
 ## Offene Punkte für die Fortsetzung
 1. Wägezellen (4×, C3-Klasse) noch beschaffen - **vorher entscheiden:**
@@ -132,7 +180,10 @@ späteren Umstieg auf Deep Sleep müsste diese Strategie neu gedacht werden.
      jederzeit erreichbar - und die Sampling-Strategie müsste umgebaut werden)
    - Schwarm-Alarm-Automation in HA (plötzlicher Gewichtsverlust)
    - `state_class: measurement` für Langzeit-Statistiken in HA
-   - Variable Messintervalle je Saison (Frühling engmaschiger)
+   - Saisonale Messintervalle: die Voraussetzung dafür steht jetzt (die
+     Number-Entity ist aus HA beschreibbar), es fehlt nur noch eine
+     HA-Automation, die "Waage eG Messintervall" z. B. im Frühjahr auf 60
+     und im Winter auf 1440 setzt
 
 ## Umgebungs-Infos (Home Assistant-seitig)
 - ESPHome Device Builder Add-on: Slug `5c53de3b_esphome`, Port `6052`,

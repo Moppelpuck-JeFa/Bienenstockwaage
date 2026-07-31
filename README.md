@@ -16,7 +16,9 @@ ESP8266 (D1 Mini) mit HX711-Wägezellenverstärker und 4 Wägezellen.
 
 ## Was das Gerät kann
 
-- Gewicht in **kg**, gerundet auf **0,5 kg**, alle **6 Stunden** an Home Assistant
+- Gewicht in **kg**, gerundet auf **0,5 kg**
+- **Messintervall frei einstellbar aus Home Assistant** (1 Minute bis 7 Tage),
+  Voreinstellung 360 min = 6 h
 - **Zwei-Punkt-Kalibrierung per Button aus HA** - kein festes `calibrate_linear`
   im YAML, die Kalibrierwerte liegen in `globals` mit `restore_value: yes` und
   überleben einen Neustart
@@ -44,6 +46,32 @@ drei Buttons gilt: erst auflegen bzw. abräumen, **~1 Minute warten**, dann drü
 Zarge) und lässt die Kalibrierung unangetastet. Umgekehrt setzt
 "Kalibrieren 0kg" ein bestehendes Tara zurück, weil es mit einem neuen
 Nullpunkt seine Bedeutung verliert.
+
+## Messintervall einstellen
+
+In Home Assistant gibt es die Entity **"Waage eG Messintervall"** - ein
+Eingabefeld in **Minuten**, in das du die Zahl direkt eintippst.
+
+| Wunsch | Eintrag |
+|--------|---------|
+| 15 Minuten | `15` |
+| 1 Stunde | `60` |
+| 6 Stunden (Voreinstellung) | `360` |
+| 12 Stunden | `720` |
+| 1 Tag | `1440` |
+
+Erlaubt ist alles von **1** bis **10080** (7 Tage). Die Änderung greift sofort:
+der Zähler startet neu und es wird direkt einmal gemessen, damit du in HA
+siehst, dass die Einstellung angekommen ist. Der Wert überlebt einen Neustart.
+
+Der HX711 selbst misst unabhängig davon weiter im Sekundentakt - das Intervall
+steuert nur, wie oft ein Wert **nach Home Assistant** geschickt wird. Ein
+kurzes Intervall kostet also keine zusätzliche Messgenauigkeit und ein langes
+verschlechtert sie nicht.
+
+Nach einem Neustart kommt der erste Wert bereits nach ~1 Minute, unabhängig vom
+eingestellten Intervall - du musst also nicht bis zum Ablauf einer vollen
+Periode warten, um zu sehen, ob das Gerät läuft.
 
 ## Konfiguration prüfen
 

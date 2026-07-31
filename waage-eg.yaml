@@ -21,7 +21,7 @@ captive_portal:
 api:
   encryption:
     key: !secret api_encryption_key
-  # Verhindert einen unnötigen Neustart, falls bei 6h-Messintervall
+  # Verhindert einen unnötigen Neustart, falls bei langem Messintervall
   # zwischendurch mal kurz keine Verbindung zu HA besteht
   reboot_timeout: 0s
 
@@ -47,6 +47,13 @@ globals:
     type: float
     restore_value: yes
     initial_value: '1750.0'
+  # Zählt die Minuten seit der letzten Veröffentlichung an HA.
+  # Bewusst NICHT restore_value - nach einem Neustart soll sofort
+  # wieder gemessen werden, nicht erst nach dem Restintervall.
+  - id: minuten_seit_messung
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
 
 # --- HX711 Wägezellen-Verstärker ---
 sensor:
@@ -57,12 +64,13 @@ sensor:
     dout_pin: D1
     clk_pin: D2
     gain: 128
-    # WICHTIG: Der HX711 wird bewusst SCHNELL abgefragt (1s), obwohl der
-    # Messwert in HA nur alle 6h erscheinen soll. Grund: Die Filterkette
-    # unten braucht laufend frische Rohwerte, und die Kalibrier-/Tara-Buttons
-    # lesen den gefilterten Zustand dieses Sensors im Moment des Drückens.
-    # Bei einem 6h-Rohintervall wäre dieser Wert praktisch nie aktuell.
-    # Die 6h-Taktung passiert ausschließlich am sichtbaren Sensor darunter.
+    # WICHTIG: Der HX711 wird bewusst SCHNELL abgefragt (1s), auch wenn der
+    # Messwert in HA nur alle paar Stunden erscheinen soll. Grund: Die
+    # Filterkette unten braucht laufend frische Rohwerte, und die Kalibrier-/
+    # Tara-Buttons lesen den gefilterten Zustand dieses Sensors im Moment des
+    # Drückens. Bei einem langsamen Rohintervall wäre dieser Wert nie aktuell.
+    # Die Taktung nach HA passiert ausschließlich über den interval:-Block
+    # ganz unten, gesteuert durch die Number-Entity "Messintervall".
     update_interval: 1s
     filters:
       # 1) Ausreißer (Spikes) rausfiltern, bevor überhaupt gemittelt wird.
@@ -87,7 +95,9 @@ sensor:
     name: "Waage eG Gewicht"
     unit_of_measurement: "kg"
     accuracy_decimals: 1
-    update_interval: 6h
+    # "never" = kein fester Takt. Veröffentlicht wird ausschließlich, wenn
+    # der interval:-Block unten oder ein Button update() aufruft.
+    update_interval: never
     lambda: |-
       float raw = id(hx711_raw_counts).state;
       // Solange der HX711 noch keinen gefilterten Wert geliefert hat
@@ -109,10 +119,12 @@ sensor:
       // Auf 0,5 kg genau runden
       return std::round(kg / 0.5) * 0.5;
 
-  # Zeigt an, wann der letzte Messwert reinkam - nützlich bei 6h-Intervall
+  # Wird zusammen mit dem Gewicht aktualisiert - dadurch sieht man in HA
+  # am Zeitstempel dieser Entity, wann die letzte Messung durchlief
   - platform: uptime
+    id: waage_uptime
     name: "Waage eG Betriebszeit"
-    update_interval: 6h
+    update_interval: never
 
 # --- Virtueller Tara-Button + Kalibrier-Buttons ---
 # Alle drei Buttons lesen direkt den gefilterten Zustand von
@@ -180,6 +192,59 @@ button:
           ESP_LOGI("waage", "0,5kg-Punkt gesetzt: roh %.1f (Span %.1f)",
                    raw, raw - id(calib_raw_zero));
       - component.update: waage_gewicht
+
+# --- Frei einstellbares Messintervall ---
+# Erscheint in HA als Eingabefeld (mode: box, also Zahl eintippen statt
+# Schieberegler). Der Wert überlebt einen Neustart (restore_value).
+number:
+  - platform: template
+    id: mess_intervall
+    name: "Waage eG Messintervall"
+    icon: "mdi:timer-cog-outline"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: 360      # 360 min = 6 h (der bisherige feste Wert)
+    min_value: 1            # 1 Minute
+    max_value: 10080        # 7 Tage
+    step: 1
+    unit_of_measurement: "min"
+    mode: box
+    on_value:
+      # Neue Einstellung sofort wirksam machen und einmal messen,
+      # damit man in HA direkt sieht, dass die Änderung angekommen ist
+      - lambda: |-
+          id(minuten_seit_messung) = 0;
+          id(waage_gewicht).update();
+          id(waage_uptime).update();
+          ESP_LOGI("waage", "Messintervall auf %.0f min gesetzt", x);
+
+# --- Taktgeber für die Veröffentlichung an Home Assistant ---
+# Läuft jede Minute und zählt hoch. Ist das eingestellte Intervall erreicht,
+# werden Gewicht und Betriebszeit veröffentlicht und der Zähler beginnt neu.
+interval:
+  - interval: 60s
+    then:
+      - lambda: |-
+          float soll_f = id(mess_intervall).state;
+          // Absicherung, falls die Number noch keinen Wert hat
+          if (std::isnan(soll_f) || soll_f < 1.0f) {
+            soll_f = 1.0f;
+          }
+          uint32_t soll = (uint32_t) soll_f;
+
+          id(minuten_seit_messung)++;
+
+          // Solange noch nie ein Gewicht veröffentlicht wurde (frisch
+          // gebootet), jede Minute erneut versuchen - dann steht der erste
+          // Wert nach ~1 min in HA statt erst nach einem vollen Intervall
+          bool noch_kein_wert = std::isnan(id(waage_gewicht).state);
+
+          if (id(minuten_seit_messung) >= soll || noch_kein_wert) {
+            id(minuten_seit_messung) = 0;
+            id(waage_gewicht).update();
+            id(waage_uptime).update();
+          }
 
 # Optional: Web-Server für schnellen Zugriff im Browser ohne Home Assistant
 web_server:
