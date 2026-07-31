@@ -137,6 +137,10 @@ sensor:
     name: "Waage eG Gewicht"
     unit_of_measurement: "kg"
     accuracy_decimals: 1
+    # Ohne state_class legt HA keine Langzeitstatistik an - dann bleiben
+    # statistics-graph-Karten und Ableitungen (kg/Tag) im Dashboard leer.
+    device_class: weight
+    state_class: measurement
     # "never" = kein fester Takt. Veröffentlicht wird ausschließlich, wenn
     # der interval:-Block unten oder ein Button update() aufruft.
     update_interval: never
@@ -194,6 +198,9 @@ sensor:
     icon: "mdi:counter"
     unit_of_measurement: "counts"
     accuracy_decimals: 0
+    # Für die Driftanalyse: so bekommt der Rohwert eine Langzeitstatistik
+    # und lässt sich über Wochen gegen die Temperatur auftragen.
+    state_class: measurement
     entity_category: diagnostic
     update_interval: never
     lambda: 'return id(hx711_raw_counts).state;'
