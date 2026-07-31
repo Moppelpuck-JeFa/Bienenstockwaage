@@ -77,6 +77,74 @@ erst auflegen/abräumen, **~1 Minute warten**, dann drücken.
 Netzbetrieb vorausgesetzt kostet das schnellere Sampling nichts. Bei einem
 späteren Umstieg auf Deep Sleep müsste diese Strategie neu gedacht werden.
 
+## FEHLER GEFUNDEN: `restore_from_flash` fehlte (Kalibrierung ging verloren)
+
+**Symptom:** Die Waage misst völlig konfus.
+
+**Ursache:** Auf dem ESP8266 legt ESPHome `restore_value`-Werte standardmäßig
+**nur ins RTC-RAM**. Verifiziert in `components/esp8266/preferences.h`:
+
+```cpp
+ESPPreferenceObject make_preference(size_t length, uint32_t type) {
+#ifdef USE_ESP8266_PREFERENCES_FLASH
+    return this->make_preference(length, type, true);
+#else
+    return this->make_preference(length, type, false);   // <- RTC
+#endif
+}
+```
+
+`USE_ESP8266_PREFERENCES_FLASH` wird nur gesetzt, wenn `restore_from_flash:
+true` im `esp8266:`-Block steht (`components/esp8266/__init__.py`, Default ist
+`False`). Die `globals` benutzen genau diesen Zwei-Argument-Aufruf
+(`globals_component.h`).
+
+RTC-RAM übersteht einen Reboot und Deep Sleep, ist aber bei **jedem
+Stromausfall oder Steckerziehen weg**. Danach greifen die `initial_value`-
+Platzhalter: `calib_raw_zero = 0`, `calib_raw_ref = 1750`, `calib_kg_ref = 0.5`.
+
+**Was das konkret anrichtet:** Der Umrechnungsfaktor fällt von realistischen
+~18.000 counts/kg auf **3.500 counts/kg**, und der Nullpunkt liegt bei 0 statt
+bei den realen mehreren Hunderttausend counts. Durchgerechnet:
+
+| HX711-Rohwert | Anzeige | Drift bei +2000 counts |
+|---|---|---|
+| 200.000 | 57,1 kg | +0,6 kg |
+| 400.000 | 114,3 kg | +0,6 kg |
+| 800.000 | 228,6 kg | +0,6 kg |
+
+Also ein völlig falscher Absolutwert, der zusätzlich rund **fünfmal so stark
+zappelt** wie bei korrekter Kalibrierung (dort wären +2000 counts nur 0,11 kg).
+Das trifft die Beschreibung "misst völlig konfus" genau.
+
+**Fix:** `restore_from_flash: true` im `esp8266:`-Block. Flash-Verschleiß ist
+unkritisch, weil sich die gespeicherten Werte nur bei manueller Bedienung ändern.
+
+**Betroffen waren außerdem** die beiden Number-Entities (Messintervall,
+Referenzgewicht) - auch die fielen nach Stromverlust auf ihre Voreinstellung
+zurück.
+
+### Zweiter Fund: die Span-Prüfung war zu schwach
+Der Kalibrier-Button prüfte nur auf `raw == calib_raw_zero`, also exakte
+Gleichheit. Der praktisch häufigere Fehler ist ein *fast* gleicher Rohwert -
+etwa weil nach dem Auflegen die ~60s Filterlaufzeit nicht abgewartet wurde.
+Dann kommt ein winziger Span durch die Prüfung und der Umrechnungsfaktor
+explodiert. Jetzt wird ein Span unter **500 counts** abgewiesen (zur
+Einordnung: das erlaubte Minimum von 0,1 kg entspricht bei 4×50 kg rund
+1800 counts).
+
+### Dritter Punkt: Diagnose war praktisch nicht möglich
+Der HX711-Sensor ist `internal: true`, der Rohwert also in HA unsichtbar. Bei
+einer Fehlfunktion ließ sich damit nicht unterscheiden, ob die Hardware oder
+die Umrechnung spinnt. Neu sind zwei Diagnose-Entities:
+
+- **"Waage eG Rohwert"** - der gefilterte HX711-Zählwert
+- **"Waage eG Kalibrierfaktor"** - counts/kg aus der aktuellen Kalibrierung,
+  Erwartungswert ~18.000
+
+Damit ist die Frage "Hardware oder Software?" in zwei Blicken beantwortet.
+Fehlersuche-Anleitung im README.
+
 ## Auflösung 0,1 kg: was das realistisch bedeutet
 
 Die Anzeige rundet auf 0,1 kg. Elektrisch ist das unkritisch, praktisch ist es

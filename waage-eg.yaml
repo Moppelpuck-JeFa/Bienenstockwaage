@@ -4,6 +4,15 @@ esphome:
 
 esp8266:
   board: d1_mini
+  # ZWINGEND für diese Konfiguration. Ohne diese Zeile legt ESPHome auf dem
+  # ESP8266 alle "restore_value"-Werte NUR ins RTC-RAM. Das übersteht einen
+  # Reboot, ist aber bei jedem Stromausfall/Steckerziehen weg - die komplette
+  # Kalibrierung wäre dann auf die initial_value-Platzhalter zurückgesetzt und
+  # die Waage zeigt Unsinn. Erst mit restore_from_flash landen die Werte
+  # wirklich dauerhaft im Flash.
+  # (Flash-Verschleiß ist hier unkritisch: Kalibrierwerte und die beiden
+  # Number-Entities ändern sich nur, wenn man sie von Hand anfasst.)
+  restore_from_flash: true
 
 # WLAN-Zugangsdaten - in secrets.yaml eintragen
 wifi:
@@ -131,6 +140,39 @@ sensor:
       }
       return gerundet;
 
+  # --- Diagnose ---
+  # Der gefilterte HX711-Rohwert, so wie ihn die Buttons und die Umrechnung
+  # sehen. Der wichtigste Wert zur Fehlersuche: springt der schon ohne Last
+  # um Tausende counts, liegt es an Hardware/Verkabelung/Stromversorgung -
+  # nicht an der Umrechnung.
+  - platform: template
+    id: rohwert
+    name: "Waage eG Rohwert"
+    icon: "mdi:counter"
+    unit_of_measurement: "counts"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: never
+    lambda: 'return id(hx711_raw_counts).state;'
+
+  # counts pro kg aus der aktuellen Kalibrierung. Erwartungswert bei 4x50kg
+  # sind grob 18000. Steht hier etwas völlig anderes (z. B. 3500 oder ein
+  # riesiger Wert), ist die Kalibrierung kaputt und muss wiederholt werden.
+  - platform: template
+    id: kalibrierfaktor
+    name: "Waage eG Kalibrierfaktor"
+    icon: "mdi:function-variant"
+    unit_of_measurement: "counts/kg"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: never
+    lambda: |-
+      float span = id(calib_raw_ref) - id(calib_raw_zero);
+      if (id(calib_kg_ref) == 0.0f) {
+        return {};
+      }
+      return span / id(calib_kg_ref);
+
   # Zeigt, mit welchem Referenzgewicht zuletzt WIRKLICH kalibriert wurde.
   # Wichtig zur Unterscheidung von der Number-Entity "Referenzgewicht", die
   # nur die Eingabe für die nächste Kalibrierung ist.
@@ -209,15 +251,24 @@ button:
             ESP_LOGW("waage", "Kalibrierung ignoriert: kein Messwert");
             return;
           }
-          if (raw == id(calib_raw_zero)) {
-            ESP_LOGW("waage", "Kalibrierung ignoriert: Rohwert identisch zum "
-                              "Nullpunkt - liegt das Gewicht wirklich auf?");
-            return;
-          }
           float ref = id(referenzgewicht).state;
           if (std::isnan(ref) || ref <= 0.0f) {
             ESP_LOGW("waage", "Kalibrierung ignoriert: Referenzgewicht "
                               "ungueltig (%.3f kg)", ref);
+            return;
+          }
+          // Der Span muss plausibel gross sein. Ein winziger Span ist der
+          // klassische Fehlerfall (Gewicht vergessen, oder nach dem Auflegen
+          // nicht die ~60s Filterlaufzeit abgewartet) und wuerde den
+          // Umrechnungsfaktor explodieren lassen - die Waage misst dann
+          // voellig konfus. Zur Groessenordnung: bei 4x50kg sind rund
+          // 18000 counts/kg zu erwarten, das Minimum von 0,1 kg ergaebe
+          // also ~1800 counts.
+          float span = raw - id(calib_raw_zero);
+          if (std::fabs(span) < 500.0f) {
+            ESP_LOGW("waage", "Kalibrierung ignoriert: Span nur %.1f counts. "
+                              "Liegt das Gewicht wirklich auf? Und wurden nach "
+                              "dem Auflegen ~1 min gewartet?", span);
             return;
           }
           id(calib_raw_ref) = raw;
@@ -226,10 +277,10 @@ button:
           id(calib_kg_ref) = ref;
           ESP_LOGI("waage", "Referenzpunkt gesetzt: %.3f kg = roh %.1f "
                             "(Span %.1f counts, %.1f counts/kg)",
-                   ref, raw, raw - id(calib_raw_zero),
-                   (raw - id(calib_raw_zero)) / ref);
+                   ref, raw, span, span / ref);
       - component.update: waage_gewicht
       - component.update: kalibriert_mit
+      - component.update: kalibrierfaktor
 
 # --- Einstellbares Referenzgewicht + Messintervall ---
 # Beide erscheinen in HA als Eingabefeld (mode: box, also Zahl eintippen statt
@@ -310,8 +361,10 @@ interval:
             id(minuten_seit_messung) = 0;
             id(waage_gewicht).update();
             id(waage_uptime).update();
-            // Sorgt nebenbei dafür, dass die Diagnose-Entity nach einem
-            // Neustart überhaupt einen Wert bekommt
+            // Sorgt nebenbei dafür, dass die Diagnose-Entities nach einem
+            // Neustart überhaupt einen Wert bekommen
+            id(rohwert).update();
+            id(kalibrierfaktor).update();
             id(kalibriert_mit).update();
           }
 

@@ -120,6 +120,51 @@ Nach einem Neustart kommt der erste Wert bereits nach ~1 Minute, unabhängig vom
 eingestellten Intervall - du musst also nicht bis zum Ablauf einer vollen
 Periode warten, um zu sehen, ob das Gerät läuft.
 
+## Fehlersuche: die Waage misst Unsinn
+
+Drei Diagnose-Entities beantworten die Frage, wo es klemmt. Sie stehen in HA
+unter "Diagnose" und werden bei jeder Messung aktualisiert.
+
+**1. "Waage eG Kalibrierfaktor"** — der wichtigste Wert. Erwartet werden bei
+4 × 50 kg grob **18.000 counts/kg**.
+
+| Anzeige | Bedeutung |
+|---|---|
+| ~3.500 | Die Kalibrierung ist auf die Platzhalter zurückgefallen. Neu kalibrieren. |
+| sehr groß (>100.000) | Beim Kalibrieren war der Span zu klein — Gewicht lag nicht auf, oder es wurde nicht ~1 min gewartet. Neu kalibrieren. |
+| plausibel (~18.000) | Die Umrechnung ist in Ordnung, weiter bei Punkt 2. |
+
+**2. "Waage eG Rohwert"** — der gefilterte HX711-Zählwert. Bei **unbelasteter,
+ruhender** Waage sollte der über Minuten nur um einige hundert counts wandern.
+Springt er um Tausende, liegt es an der Hardware und nicht an dieser
+Konfiguration: Verkabelung, Wackelkontakt in der Junction-Box, Halbbrücken-
+statt Vollbrückenzellen, oder eine zu schwache Speisung (siehe
+[`docs/waegezellen-verkabelung.md`](docs/waegezellen-verkabelung.md), Abschnitt
+zum Eingangswiderstand).
+
+**3. "Waage eG Kalibriert mit"** — das Referenzgewicht, mit dem tatsächlich
+kalibriert wurde. Steht hier 0,5 obwohl du mit 10 kg kalibriert hast, wurde der
+Kalibrier-Button nicht wirksam ausgeführt (Log prüfen).
+
+### Das Log ist ergiebiger als jede Entity
+
+Der HX711-Treiber loggt **jeden** Rohwert im Sekundentakt:
+
+```
+[D][hx711:031]: '': Got value 412345
+```
+
+Damit siehst du live, wie ruhig das Signal wirklich ist. Zwei Warnungen deuten
+direkt auf Verkabelung hin:
+
+```
+[W][hx711:039]: HX711 is not ready for new measurements yet!
+[W][hx711:062]: HX711 DOUT pin not high after reading (data 0x...)!
+```
+
+Die Kalibrier-Buttons loggen ebenfalls, was sie gespeichert haben — oder warum
+sie abgebrochen sind (`Span nur ... counts`, `Referenzgewicht ungueltig`).
+
 ## Konfiguration prüfen
 
 ```bash
