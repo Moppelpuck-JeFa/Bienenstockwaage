@@ -22,6 +22,7 @@ ESP8266 (D1 Mini) mit HX711-Wägezellenverstärker und 4 Wägezellen.
 - **Zwei-Punkt-Kalibrierung per Button aus HA** - kein festes `calibrate_linear`
   im YAML, die Kalibrierwerte liegen in `globals` mit `restore_value: yes` und
   überleben einen Neustart
+- **Referenzgewicht frei wählbar** (0,1 bis 50 kg) - je schwerer, desto genauer
 - **Tara-Button**, unabhängig von der Kalibrierung
 - Fallback-Hotspot, OTA-Updates, Webserver auf Port 80
 
@@ -37,10 +38,40 @@ ESP8266 (D1 Mini) mit HX711-Wägezellenverstärker und 4 Wägezellen.
 Die Waage mittelt das Rohsignal über etwa **60 Sekunden**. Deshalb bei allen
 drei Buttons gilt: erst auflegen bzw. abräumen, **~1 Minute warten**, dann drücken.
 
-1. Waage komplett leer räumen → 1 min warten → **"Waage eG Kalibrieren 0kg"**
-2. 500-g-Referenzgewicht auflegen → 1 min warten → **"Waage eG Kalibrieren 0,5kg"**
-3. Fertig. Ob es geklappt hat, steht im ESPHome-Log (`Nullpunkt gesetzt: ...`
-   bzw. `0,5kg-Punkt gesetzt: ... (Span ...)`).
+1. **"Waage eG Referenzgewicht"** auf die Masse deines Prüfgewichts stellen
+   (in kg, z. B. `10` oder `4.987`). Das ist nur die Eingabe - sie ändert noch
+   nichts.
+2. Waage komplett leer räumen → 1 min warten → **"Waage eG Kalibrieren 0kg"**
+3. Referenzgewicht auflegen → 1 min warten →
+   **"Waage eG Kalibrieren Referenzgewicht"**
+4. Fertig. Ob es geklappt hat, steht im ESPHome-Log (`Nullpunkt gesetzt: ...`
+   bzw. `Referenzpunkt gesetzt: 10.000 kg = roh ... (Span ... counts, ... counts/kg)`).
+   Die Diagnose-Entity **"Waage eG Kalibriert mit"** zeigt danach dauerhaft an,
+   mit welchem Gewicht zuletzt tatsächlich kalibriert wurde.
+
+### Nimm ein möglichst schweres Referenzgewicht
+
+Der gemessene Span wird auf den ganzen Bereich bis 200 kg hochgerechnet. Bei
+0,5 kg Referenz ist das Faktor 400 - und jeder Fehler beim Setzen des Punkts
+skaliert genauso mit hoch. Konkret, bei einem Ablesefehler von 20 counts und
+hochgerechnet auf 100 kg:
+
+| Referenzgewicht | Fehler bei 100 kg |
+|---|---|
+| 0,5 kg | ~222 g |
+| 10 kg | ~11 g |
+
+Erlaubt ist alles von **0,1 bis 50 kg** in 1-g-Schritten. Ein nachgewogener
+Sack Zucker oder eine Hantelscheibe tut es - Hauptsache, du kennst die Masse
+und trägst sie genau ein. Und: **das Gewicht möglichst mittig auflegen**, sonst
+geht der Eckenfehler der Wägezellen direkt in die Kalibrierung ein.
+
+### Referenzgewicht ändern ändert nichts an der Messung
+
+Die Number-Entity ist reine Eingabe für die **nächste** Kalibrierung. Die
+Anzeige rechnet gegen das Gewicht, mit dem tatsächlich kalibriert wurde
+(sichtbar unter "Kalibriert mit"). Du kannst die Zahl also gefahrlos anpassen -
+wirksam wird sie erst mit dem Druck auf den Kalibrier-Button.
 
 **"Waage eG Tara"** nullt nur das gerade aufliegende Gewicht (z. B. eine leere
 Zarge) und lässt die Kalibrierung unangetastet. Umgekehrt setzt

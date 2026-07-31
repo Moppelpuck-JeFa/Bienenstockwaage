@@ -42,11 +42,20 @@ globals:
     type: float
     restore_value: yes
     initial_value: '0.0'
-  # Rohwert (HX711-Zählwert), der 0,5 kg entspricht - per Button kalibrierbar
-  - id: calib_raw_half
+  # Rohwert (HX711-Zählwert), der dem Referenzgewicht entspricht
+  - id: calib_raw_ref
     type: float
     restore_value: yes
     initial_value: '1750.0'
+  # Das Referenzgewicht in kg, mit dem TATSÄCHLICH kalibriert wurde.
+  # Bewusst getrennt von der Number-Entity "Referenzgewicht": die Number ist
+  # nur die Eingabe für die NÄCHSTE Kalibrierung. Würde die Anzeige direkt
+  # gegen die Number rechnen, würde ein späteres Ändern der Zahl alle
+  # Messwerte still verfälschen, ohne dass neu kalibriert wurde.
+  - id: calib_kg_ref
+    type: float
+    restore_value: yes
+    initial_value: '0.5'
   # Zählt die Minuten seit der letzten Veröffentlichung an HA.
   # Bewusst NICHT restore_value - nach einem Neustart soll sofort
   # wieder gemessen werden, nicht erst nach dem Restintervall.
@@ -105,11 +114,11 @@ sensor:
       if (std::isnan(raw)) {
         return {};
       }
-      float span = id(calib_raw_half) - id(calib_raw_zero);
+      float span = id(calib_raw_ref) - id(calib_raw_zero);
       float kg = 0.0;
       // Schutz, falls noch nicht kalibriert wurde (Division durch 0)
       if (span != 0.0) {
-        kg = (raw - id(calib_raw_zero)) * 0.5 / span;
+        kg = (raw - id(calib_raw_zero)) * id(calib_kg_ref) / span;
       }
       kg -= id(tare_offset);
       // Auf 0,1 kg genau runden. Bewusst *10 und /10 statt /0.1 und *0.1 -
@@ -121,6 +130,19 @@ sensor:
         gerundet = 0.0f;
       }
       return gerundet;
+
+  # Zeigt, mit welchem Referenzgewicht zuletzt WIRKLICH kalibriert wurde.
+  # Wichtig zur Unterscheidung von der Number-Entity "Referenzgewicht", die
+  # nur die Eingabe für die nächste Kalibrierung ist.
+  - platform: template
+    id: kalibriert_mit
+    name: "Waage eG Kalibriert mit"
+    icon: "mdi:weight-kilogram"
+    unit_of_measurement: "kg"
+    accuracy_decimals: 3
+    entity_category: diagnostic
+    update_interval: never
+    lambda: 'return id(calib_kg_ref);'
 
   # Wird zusammen mit dem Gewicht aktualisiert - dadurch sieht man in HA
   # am Zeitstempel dieser Entity, wann die letzte Messung durchlief
@@ -147,9 +169,9 @@ button:
             ESP_LOGW("waage", "Tara ignoriert: noch kein HX711-Messwert");
             return;
           }
-          float span = id(calib_raw_half) - id(calib_raw_zero);
+          float span = id(calib_raw_ref) - id(calib_raw_zero);
           if (span != 0.0) {
-            id(tare_offset) = (raw - id(calib_raw_zero)) * 0.5 / span;
+            id(tare_offset) = (raw - id(calib_raw_zero)) * id(calib_kg_ref) / span;
             ESP_LOGI("waage", "Tara gesetzt: %.3f kg (roh %.1f)",
                      id(tare_offset), raw);
           } else {
@@ -175,31 +197,72 @@ button:
                    raw);
       - component.update: waage_gewicht
 
-  # Kalibrierung Schritt 2: 500g-Referenzgewicht auflegen, ~1min warten, drücken
+  # Kalibrierung Schritt 2: Referenzgewicht auflegen, dessen Masse vorher in
+  # die Number-Entity "Referenzgewicht" eintragen, ~1min warten, dann drücken
   - platform: template
-    name: "Waage eG Kalibrieren 0,5kg"
+    name: "Waage eG Kalibrieren Referenzgewicht"
     icon: "mdi:target"
     on_press:
       - lambda: |-
           float raw = id(hx711_raw_counts).state;
           if (std::isnan(raw)) {
-            ESP_LOGW("waage", "Kalibrierung 0,5kg ignoriert: kein Messwert");
+            ESP_LOGW("waage", "Kalibrierung ignoriert: kein Messwert");
             return;
           }
           if (raw == id(calib_raw_zero)) {
-            ESP_LOGW("waage", "Kalibrierung 0,5kg ignoriert: identisch zum "
+            ESP_LOGW("waage", "Kalibrierung ignoriert: Rohwert identisch zum "
                               "Nullpunkt - liegt das Gewicht wirklich auf?");
             return;
           }
-          id(calib_raw_half) = raw;
-          ESP_LOGI("waage", "0,5kg-Punkt gesetzt: roh %.1f (Span %.1f)",
-                   raw, raw - id(calib_raw_zero));
+          float ref = id(referenzgewicht).state;
+          if (std::isnan(ref) || ref <= 0.0f) {
+            ESP_LOGW("waage", "Kalibrierung ignoriert: Referenzgewicht "
+                              "ungueltig (%.3f kg)", ref);
+            return;
+          }
+          id(calib_raw_ref) = raw;
+          // Das benutzte Referenzgewicht mitspeichern - ab jetzt rechnet die
+          // Anzeige gegen DIESEN Wert, nicht gegen die Number-Entity
+          id(calib_kg_ref) = ref;
+          ESP_LOGI("waage", "Referenzpunkt gesetzt: %.3f kg = roh %.1f "
+                            "(Span %.1f counts, %.1f counts/kg)",
+                   ref, raw, raw - id(calib_raw_zero),
+                   (raw - id(calib_raw_zero)) / ref);
       - component.update: waage_gewicht
+      - component.update: kalibriert_mit
 
-# --- Frei einstellbares Messintervall ---
-# Erscheint in HA als Eingabefeld (mode: box, also Zahl eintippen statt
-# Schieberegler). Der Wert überlebt einen Neustart (restore_value).
+# --- Einstellbares Referenzgewicht + Messintervall ---
+# Beide erscheinen in HA als Eingabefeld (mode: box, also Zahl eintippen statt
+# Schieberegler). Die Werte überleben einen Neustart (restore_value).
 number:
+  # Masse des Gewichts, mit dem du kalibrierst. Reine EINGABE - wirksam wird
+  # sie erst beim Druck auf "Kalibrieren Referenzgewicht". Was aktuell gilt,
+  # steht in der Diagnose-Entity "Kalibriert mit".
+  #
+  # Ein schwereres Referenzgewicht ist deutlich besser: Der Span wird auf den
+  # ganzen Messbereich (bis 200 kg) hochgerechnet, bei 0,5 kg also mit Faktor
+  # 400. Jeder Fehler beim Setzen des Punkts skaliert genauso mit hoch. Mit
+  # 10 kg statt 0,5 kg sinkt dieser Hebel um den Faktor 20.
+  - platform: template
+    id: referenzgewicht
+    name: "Waage eG Referenzgewicht"
+    icon: "mdi:weight-kilogram"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: 0.5      # bisheriges Verhalten als Voreinstellung
+    min_value: 0.1
+    max_value: 50
+    step: 0.001             # erlaubt z. B. 4,987 kg fuer ein nachgewogenes Stueck
+    unit_of_measurement: "kg"
+    mode: box
+    on_value:
+      - lambda: |-
+          ESP_LOGI("waage", "Referenzgewicht auf %.3f kg gesetzt - wirksam erst "
+                            "beim naechsten Druck auf 'Kalibrieren "
+                            "Referenzgewicht' (aktuell kalibriert mit %.3f kg)",
+                   x, id(calib_kg_ref));
+
   - platform: template
     id: mess_intervall
     name: "Waage eG Messintervall"
@@ -247,6 +310,9 @@ interval:
             id(minuten_seit_messung) = 0;
             id(waage_gewicht).update();
             id(waage_uptime).update();
+            // Sorgt nebenbei dafür, dass die Diagnose-Entity nach einem
+            // Neustart überhaupt einen Wert bekommt
+            id(kalibriert_mit).update();
           }
 
 # Optional: Web-Server für schnellen Zugriff im Browser ohne Home Assistant

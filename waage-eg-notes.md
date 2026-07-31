@@ -30,7 +30,10 @@ ESPHome Device Builder Add-on in Home Assistant.
 - **Kein festes `calibrate_linear`** im YAML - Kalibrierung läuft komplett
   dynamisch über zwei Buttons in Home Assistant:
   - **"Waage eG Kalibrieren 0kg"** - Waage leer stellen, dann drücken
-  - **"Waage eG Kalibrieren 0,5kg"** - 500g-Referenzgewicht auflegen, dann drücken
+  - **"Waage eG Kalibrieren Referenzgewicht"** - Prüfgewicht auflegen, dann
+    drücken. Dessen Masse ist über die Number-Entity **"Waage eG
+    Referenzgewicht"** frei einstellbar (0,1-50 kg, Voreinstellung 0,5 kg -
+    war ursprünglich fest auf 0,5 kg verdrahtet)
 - **"Waage eG Tara"** - separater Button, nullt nur das aktuell aufliegende
   Gewicht (z. B. Behälter), ändert NICHTS an der Kalibrierung selbst
 - Messintervall **frei aus HA einstellbar** über die Number-Entity
@@ -108,15 +111,8 @@ sein, abhängig davon, ob die Junction-Box getrimmt ist. Die feinere Anzeige
 schadet dabei nicht, man sollte die letzte Stelle nur nicht als absolute
 Wahrheit lesen.
 
-**Ein Hebel, der noch offen ist: das Referenzgewicht.** Die Kalibrierung
-bestimmt den Span aus 0,5 kg und rechnet ihn auf bis zu 200 kg hoch - ein
-Faktor 400. Jeder Fehler beim Setzen des 0,5-kg-Punkts (Rauschen, aber vor
-allem ein außermittig liegendes Gewichtchen) wird mit hochskaliert. Ein
-schwereres Referenzgewicht (5 oder 10 kg) würde den Span deutlich robuster
-machen. Das ist bei 0,1 kg Auflösung der wirksamste einzelne Verbesserungshebel
-und wäre ein kleiner Umbau: eine zweite Number-Entity "Referenzgewicht" statt
-der fest verdrahteten 0,5. **Bewusst nicht umgesetzt**, weil die Anforderung
-explizit den 0,5-kg-Button nennt.
+**Der wirksamste Hebel ist das Referenzgewicht - inzwischen umgesetzt.** Siehe
+Abschnitt "Frei wählbares Referenzgewicht".
 
 ### Umsetzung im Code
 - `accuracy_decimals: 1` (passt für 0,1)
@@ -129,6 +125,59 @@ explizit den 0,5-kg-Button nennt.
 - Folge davon: eine leere Waage kann jetzt statt exakt 0,0 auch mal ±0,1
   anzeigen, wenn sie thermisch weggedriftet ist. Das ist ehrlicher als ein
   Deadband, das echte kleine Gewichte verschluckt.
+
+## Frei wählbares Referenzgewicht (ersetzt die fest verdrahteten 0,5 kg)
+
+Der Kalibrier-Button hieß "Kalibrieren 0,5kg" und die 0,5 stand als Literal in
+drei Lambdas. Jetzt:
+
+- **Number-Entity "Waage eG Referenzgewicht"**, kg, 0,1 bis 50, `step: 0.001`
+  (also grammgenau eintragbar), Voreinstellung 0,5 → altes Verhalten ab Werk.
+- Der Button heißt jetzt **"Waage eG Kalibrieren Referenzgewicht"**.
+  ⚠️ Das ändert die entity_id in HA - unkritisch, weil das Gerät noch nicht
+  in Betrieb ist.
+- **Diagnose-Entity "Waage eG Kalibriert mit"** zeigt, mit welchem Gewicht
+  zuletzt tatsächlich kalibriert wurde.
+
+### Der entscheidende Punkt: zwei getrennte Werte
+
+Die Number ist **reine Eingabe für die nächste Kalibrierung**. Die Anzeige
+rechnet gegen das Global `calib_kg_ref`, das beim Druck auf den Kalibrier-Button
+aus der Number übernommen wird.
+
+Würde die Anzeige direkt gegen die Number rechnen, hätte ein späteres Ändern
+der Zahl alle Messwerte still umskaliert, ohne dass je neu kalibriert wurde -
+ein Faktor-20-Fehler wäre ein Vertipper. Genau dieser Fall ist getestet
+(siehe Validierung). Die Diagnose-Entity macht die Unterscheidung nach außen
+sichtbar, sonst wäre nicht erkennbar, welcher der beiden Werte gerade gilt.
+
+### Warum schwerer besser ist
+
+Der Span wird auf bis zu 200 kg hochgerechnet, bei 0,5 kg Referenz also mit
+Faktor 400 - Fehler beim Setzen des Punkts skalieren genauso mit. Bei realistisch
+~18000 counts/kg und einem Ablesefehler von 20 counts, hochgerechnet auf 100 kg:
+
+| Referenzgewicht | Span | Fehler bei 100 kg |
+|---|---|---|
+| 0,5 kg | ~9.000 counts | ~222 g |
+| 10 kg | ~180.000 counts | ~11 g |
+
+Der zweite, in der Praxis oft größere Effekt: ein kleines 500-g-Gewicht liegt
+auf einer Stockplatte fast zwangsläufig außermittig und trifft damit den
+Eckenfehler voll. Deshalb steht im README ausdrücklich "möglichst mittig auflegen".
+
+### Absicherungen im Button
+- Referenzgewicht `NaN` oder `<= 0` → Abbruch mit Log-Warnung
+  (`min_value: 0.1` verhindert das über HA schon, aber der Wert kommt auch aus
+  `restore_value` zurück)
+- Rohwert identisch zum Nullpunkt → Abbruch (Gewicht vergessen aufzulegen)
+- In beiden Fällen bleiben `calib_raw_ref` und `calib_kg_ref` unangetastet,
+  eine funktionierende Kalibrierung wird also nie durch einen Fehlgriff zerstört
+- `on_value` der Number loggt explizit, dass die Änderung erst beim nächsten
+  Druck auf den Kalibrier-Button wirksam wird, und nennt den aktuell gültigen Wert
+
+### Umbenanntes Global
+`calib_raw_half` → `calib_raw_ref`, weil "half" (für 0,5 kg) nicht mehr stimmt.
 
 ## Einstellbares Messintervall (ersetzt das feste 6h)
 
@@ -173,7 +222,7 @@ Intervall kostet keine Genauigkeit, ein langes verschlechtert sie nicht.
 - **"Kalibrieren 0kg" setzt jetzt `tare_offset` auf 0.** Ein frisch gesetzter
   Nullpunkt macht ein altes Tara sinnlos - sonst zeigt die leere Waage direkt
   nach der Nullpunktkalibrierung `-tare_offset` statt 0 an.
-- **Plausibilitätsprüfung bei "Kalibrieren 0,5kg":** Ist der Rohwert identisch
+- **Plausibilitätsprüfung beim Referenzpunkt:** Ist der Rohwert identisch
   mit dem Nullpunkt, wird abgebrochen (typischer Fehler: Referenzgewicht
   vergessen aufzulegen). Sonst wäre `span == 0` und die Waage tot.
 - **Logging:** Alle drei Buttons loggen, was sie gespeichert haben - macht die
@@ -213,6 +262,15 @@ Intervall kostet keine Genauigkeit, ein langes verschlechtert sie nicht.
     **alle 2001 Stufen von 0 bis 200 kg in 0,1er-Schritten ohne Abweichung**
     (bestätigt nebenbei, dass die `float`-Genauigkeit über den ganzen
     Messbereich reicht)
+  - Das frei wählbare Referenzgewicht wurde separat durchgerechnet, mit
+    realistischen 18035 counts/kg: Kalibrierung auf 10 kg → leer 0,0 |
+    Referenzpunkt 10,0 | 47,3 | 132,6 | 200,0 kg jeweils exakt.
+    **Der kritische Fall ist explizit geprüft:** Number nach der Kalibrierung
+    von 10 auf 0,5 kg geändert → Anzeige bleibt bei 47,30 kg, "Kalibriert mit"
+    bleibt 10,000 kg. Abgewiesen werden 0 kg, negative Werte, `NaN` und
+    "Gewicht vergessen" (Rohwert == Nullpunkt), wobei `calib_kg_ref`
+    unberührt bleibt. Tara rechnet ebenfalls gegen das gespeicherte
+    Referenzgewicht (Tara bei 23,4 kg → 0,0, danach 31,9 kg brutto → 8,5 kg).
   - Filterverhalten gegen `components/sensor/filter.cpp` verifiziert
     (siehe "Sampling-Strategie")
   - `update()` ist bei beiden Sensoren public aufrufbar: `TemplateSensor` und
@@ -232,8 +290,11 @@ Intervall kostet keine Genauigkeit, ein langes verschlechtert sie nicht.
 2. Summier-/Junction-Box wählen: Fertigteil mit Trimmpotis (Eckenabgleich) vs.
    Eigenbau ohne. Oder ganz anders: 4× HX711 mit Software-Summe statt
    Parallelschaltung - Abwägung in `docs/waegezellen-verkabelung.md`
-3. Kalibrierung nach Hardware-Aufbau real durchführen (leer → 1 min warten →
-   "Kalibrieren 0kg", 500g-Gewicht auflegen → 1 min warten → "Kalibrieren 0,5kg")
+3. Kalibrierung nach Hardware-Aufbau real durchführen: Referenzgewicht-Number
+   auf die Masse des Prüfgewichts stellen → leer räumen → 1 min warten →
+   "Kalibrieren 0kg" → Gewicht mittig auflegen → 1 min warten →
+   "Kalibrieren Referenzgewicht". Möglichst schweres Prüfgewicht nehmen
+   (siehe Abschnitt "Frei wählbares Referenzgewicht")
 4. Secrets in `secrets.yaml` ergänzen - Vorlage liegt als `secrets.yaml.example`
    bei: `wifi_ssid`, `wifi_password`, `ap_fallback_password`,
    `api_encryption_key`, `ota_password`
