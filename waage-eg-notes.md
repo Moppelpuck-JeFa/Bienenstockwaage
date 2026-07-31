@@ -53,13 +53,24 @@ Kalibrierung auf 10 kg): leer → 0,0 | Referenzpunkt → 10,0 | 37,4 | 132,6 |
 +23,400`, danach 31,9 kg brutto → 8,5 kg. Die Span-Prüfung greift dank `fabs`
 auch bei negativen Werten.
 
-**Der einzige reale Nachteil ist der ADC-Vorrat nach unten.** Verbleibende
-Kapazität = `(Rohwert_leer + 8.388.608) / 17.900`. Bei einem Rohwert um
-+600.000 sind das ~500 kg, also unkritisch. Läge der Leerwert tief im
-Negativen, müsste man A+/A− tauschen und neu kalibrieren.
+**Der einzige reale Nachteil wäre der ADC-Vorrat nach unten - GEPRÜFT und
+unkritisch.** Gemessener Rohwert bei leerer Waage: **25.830 counts**.
 
-Ein Tausch wäre ansonsten reine Kosmetik - und würde eine neue Kalibrierung
-erzwingen. Solange der Vorrat passt: so lassen.
+| | |
+|---|---|
+| Vorrat nach unten (dorthin drückt die Last) | **470 kg** |
+| Vorrat nach oben (Abheben, Drift) | 467 kg |
+| Mechanisches Limit der Zellen (4 × 50 kg) | **200 kg** ← die echte Grenze |
+| Rohwert bei 200 kg | −3.554.170 counts (42 % vom Anschlag) |
+
+Der Wandler ist also mit weitem Abstand nicht die Begrenzung. **Polarität
+bleibt wie sie ist** - ein Tausch von A+/A− wäre reine Kosmetik und würde eine
+neue Kalibrierung erzwingen.
+
+Nebenbefund: Der Brücken-Offset entspricht nur **1,44 kg** virtueller Last, die
+Brücke ist im Ruhezustand also sehr gut ausgeglichen. Zusammen mit der sauberen
+Empfindlichkeit spricht das dafür, dass die Ring-Verschaltung der vier
+Halbbrücken korrekt ist - abgesehen eben von der vertauschten Signalpolarität.
 - **HX711-Pins am ESP:** `DOUT = D1`, `CLK = D2`
 - **Empfohlene Wägezellen-Specs** (noch zu beschaffen):
   - Genauigkeitsklasse **C3 nach OIML R60**, Empfindlichkeit **2mV/V**
