@@ -1,0 +1,7 @@
+# Echte Zugangsdaten gehören nicht ins Repo - nur secrets.yaml.example
+secrets.yaml
+
+# ESPHome-Buildartefakte
+.esphome/
+.esphome-*/
+*.bin
