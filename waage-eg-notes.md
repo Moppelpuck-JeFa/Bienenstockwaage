@@ -14,11 +14,52 @@ ESPHome Device Builder Add-on in Home Assistant.
   Ohmmeter-Prüfung: [`docs/waegezellen-verkabelung.md`](docs/waegezellen-verkabelung.md),
   Abschnitt 0.
   Elektrisch kommt am ESP nur **1 HX711-Signal** an, am Code ändert sich nichts.
-- **Konsequenz für die Erwartungswerte:** Diese Zellen liefern typisch
-  ~1 mV/V statt 2 mV/V, also rund **9.000 counts/kg** statt 18.000. Für die
-  0,1-kg-Auflösung reicht das weiterhin (≈900 counts pro Schritt). Sie sind
-  aber nicht C3-klassifiziert - Temperaturdrift und Kriechen liegen über den
-  Werten im Abschnitt "Auflösung", der Absolutwert wird also weicher.
+- **Am Aufbau GEMESSENER Kalibrierfaktor: −17.900 counts/kg.** Die
+  Faustregel "Halbbrücken liefern ~1 mV/V, also ~9.000 counts/kg" war zu
+  pessimistisch - die reale Messung ist maßgeblich. Zurückgerechnet
+  entspricht das ~1,67 mV/V bei 200 kg Gesamtkapazität. Der Faktor hängt
+  übrigens **nicht** von der Speisespannung ab: Brückensignal und
+  ADC-Bereich skalieren beide mit AVDD, das kürzt sich heraus.
+- **Das Vorzeichen ist negativ**, d. h. mehr Last = kleinerer Rohwert. Die
+  Signalpolarität ist vertauscht (A+/A− bzw. die Reihenfolge der mittleren
+  Adern im Ring). Für die Umrechnung ist das folgenlos, siehe Abschnitt
+  "Negative Signalpolarität".
+- Die Zellen sind nicht C3-klassifiziert - Temperaturdrift und Kriechen liegen
+  über den Werten im Abschnitt "Auflösung", der Absolutwert wird also weicher.
+
+### Was der gemessene Faktor bedeutet
+
+| | |
+|---|---|
+| ein Anzeigeschritt (0,1 kg) | 1.790 counts |
+| HX711-Rauschen (Datenblatt, gain 128, 10 SPS) | ~21 counts |
+| Verhältnis | **~85×** - die 0,1 kg sind mit großem Abstand auflösbar |
+| 200 kg entsprechen | 42,7 % des ADC-Bereichs |
+| Sättigung erst bei | ~469 kg Abstand vom Nullpunkt |
+
+Rein rechnerisch wären sogar 10 g (179 counts) noch darstellbar. Begrenzend
+bleibt die Mechanik, nicht der Wandler.
+
+## Negative Signalpolarität (Faktor −17.900)
+
+Ein negativer Kalibrierfaktor heißt nur, dass Last den Rohwert *senkt*.
+Die Zwei-Punkt-Kalibrierung ist davon unberührt, weil sie ausschließlich mit
+der Differenz `calib_raw_ref − calib_raw_zero` rechnet: negativer Hub geteilt
+durch negativen Span ergibt wieder ein positives Gewicht.
+
+Getestet mit invertierter Polarität (Nullpunkt 600.000, −17.900 counts/kg,
+Kalibrierung auf 10 kg): leer → 0,0 | Referenzpunkt → 10,0 | 37,4 | 132,6 |
+−2,5 kg beim Abheben → −2,5. Tara bei 23,4 kg ergibt korrekt `tare_offset =
++23,400`, danach 31,9 kg brutto → 8,5 kg. Die Span-Prüfung greift dank `fabs`
+auch bei negativen Werten.
+
+**Der einzige reale Nachteil ist der ADC-Vorrat nach unten.** Verbleibende
+Kapazität = `(Rohwert_leer + 8.388.608) / 17.900`. Bei einem Rohwert um
++600.000 sind das ~500 kg, also unkritisch. Läge der Leerwert tief im
+Negativen, müsste man A+/A− tauschen und neu kalibrieren.
+
+Ein Tausch wäre ansonsten reine Kosmetik - und würde eine neue Kalibrierung
+erzwingen. Solange der Vorrat passt: so lassen.
 - **HX711-Pins am ESP:** `DOUT = D1`, `CLK = D2`
 - **Empfohlene Wägezellen-Specs** (noch zu beschaffen):
   - Genauigkeitsklasse **C3 nach OIML R60**, Empfindlichkeit **2mV/V**

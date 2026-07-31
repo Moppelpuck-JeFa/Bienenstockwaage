@@ -125,19 +125,43 @@ Periode warten, um zu sehen, ob das Gerät läuft.
 Drei Diagnose-Entities beantworten die Frage, wo es klemmt. Sie stehen in HA
 unter "Diagnose" und werden bei jeder Messung aktualisiert.
 
-**1. "Waage eG Kalibrierfaktor"** — der wichtigste Wert. Erwartet werden bei
-4 × 50 kg grob **9.000 counts/kg** mit Halbbrücken-Zellen (~1 mV/V), bzw.
-~18.000 mit Vollbrücken (~2 mV/V).
+**1. "Waage eG Kalibrierfaktor"** — der wichtigste Wert. An diesem Aufbau
+gemessen: **−17.900 counts/kg**.
 
 | Anzeige | Bedeutung |
 |---|---|
 | **exakt 3.500** | Eindeutig: die Kalibrierung ist auf die Platzhalter zurückgefallen. Neu kalibrieren. |
 | sehr groß (>100.000) | Beim Kalibrieren war der Span zu klein — Gewicht lag nicht auf, oder es wurde nicht ~1 min gewartet. Neu kalibrieren. |
-| plausibel (~9.000) | Die Umrechnung ist in Ordnung, weiter bei Punkt 2. |
+| ~±17.900 | Die Umrechnung ist in Ordnung, weiter bei Punkt 2. |
 
 Der Wert **3.500** ist die schärfste Diagnose, weil er sich exakt aus den
 Platzhaltern ergibt (1750 counts / 0,5 kg) und mit keiner realen Kalibrierung
 zufällig zusammenfällt.
+
+### Warum der Faktor negativ ist — und warum das in Ordnung ist
+
+Ein **negatives** Vorzeichen heißt nur: mehr Last erzeugt einen *kleineren*
+Rohwert. Die Signalpolarität ist vertauscht, in der Regel weil A+ und A− (bzw.
+bei der Halbbrücken-Ringschaltung die Reihenfolge der mittleren Adern)
+andersherum angeschlossen sind.
+
+**Die Umrechnung stört das nicht.** Sie benutzt ausschließlich die Differenz
+`calib_raw_ref − calib_raw_zero`; ein negativer Rohwert-Hub geteilt durch einen
+negativen Span ergibt wieder ein positives Gewicht. Anzeige, Tara und die
+Span-Plausibilitätsprüfung (die mit `fabs` arbeitet) sind alle darauf getestet.
+
+**Ein Punkt bleibt trotzdem zu prüfen: der ADC-Vorrat.** Weil die Last den
+Rohwert nach *unten* zieht, ist die Frage, wie weit es bis zum unteren
+Anschlag (−8.388.608) noch ist. Schau in "Waage eG Rohwert" bei leerer Waage:
+
+```
+verbleibende Kapazität in kg = (Rohwert + 8.388.608) / 17.900
+```
+
+Bei einem Rohwert von z. B. +600.000 sind das rund 500 kg Vorrat — völlig
+unkritisch. Läge der Rohwert dagegen schon tief im Negativen, könnte ein voller
+Stock den Wandler in die Sättigung fahren; dann A+/A− tauschen und neu
+kalibrieren.
 
 **2. "Waage eG Rohwert"** — der gefilterte HX711-Zählwert. Bei **unbelasteter,
 ruhender** Waage sollte der über Minuten nur um einige hundert counts wandern.
