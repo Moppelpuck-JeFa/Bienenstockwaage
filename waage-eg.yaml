@@ -194,11 +194,29 @@ sensor:
     update_interval: never
 
 # --- Virtueller Tara-Button + Kalibrier-Buttons ---
-# Alle drei Buttons lesen direkt den gefilterten Zustand von
+# Die Kalibrier- und Tara-Buttons lesen direkt den gefilterten Zustand von
 # hx711_raw_counts. Der ist dank 1s-Abfrage immer aktuell (max. 5s alt),
 # aber über ~60s gemittelt. Deshalb gilt fuer alle drei:
 # erst auflegen/abraeumen, dann ~1 Minute warten, DANN druecken.
 button:
+  # Erzwingt sofort eine Veröffentlichung an HA, ohne auf das eingestellte
+  # Messintervall zu warten. Gedacht fuer Einrichtung, Kalibrierung und
+  # Kontrolle - im Dauerbetrieb braucht man ihn nicht.
+  # Der Intervall-Zaehler startet dabei neu: nach einer manuellen Messung
+  # laeuft die naechste planmaessige wieder ein volles Intervall spaeter.
+  - platform: template
+    name: "Waage eG Jetzt messen"
+    icon: "mdi:refresh"
+    on_press:
+      - lambda: |-
+          id(minuten_seit_messung) = 0;
+          id(waage_gewicht).update();
+          id(waage_uptime).update();
+          id(rohwert).update();
+          id(kalibrierfaktor).update();
+          id(kalibriert_mit).update();
+          ESP_LOGI("waage", "Manuelle Messung ausgeloest");
+
   # Nullt das aktuell aufliegende Gewicht (z. B. Verpackung/Behälter),
   # ändert NICHTS an der Kalibrierung selbst
   - platform: template
@@ -220,6 +238,7 @@ button:
             ESP_LOGW("waage", "Tara ignoriert: Waage noch nicht kalibriert");
           }
       - component.update: waage_gewicht
+      - component.update: rohwert
 
   # Kalibrierung Schritt 1: Waage LEER lassen, ~1min warten, dann drücken
   - platform: template
@@ -238,6 +257,10 @@ button:
           ESP_LOGI("waage", "Nullpunkt gesetzt: roh %.1f (Tara zurueckgesetzt)",
                    raw);
       - component.update: waage_gewicht
+      - component.update: rohwert
+      # Der Nullpunkt geht in den Span ein - der Kalibrierfaktor aendert sich
+      # dadurch ebenfalls und muss neu veroeffentlicht werden
+      - component.update: kalibrierfaktor
 
   # Kalibrierung Schritt 2: Referenzgewicht auflegen, dessen Masse vorher in
   # die Number-Entity "Referenzgewicht" eintragen, ~1min warten, dann drücken
@@ -279,6 +302,7 @@ button:
                             "(Span %.1f counts, %.1f counts/kg)",
                    ref, raw, span, span / ref);
       - component.update: waage_gewicht
+      - component.update: rohwert
       - component.update: kalibriert_mit
       - component.update: kalibrierfaktor
 

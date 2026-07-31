@@ -325,6 +325,21 @@ Warum ein Minutenzähler und nicht `millis()`: der Zähler ist trivial
 nachvollziehbar und hat kein Überlaufproblem - `millis()` läuft auf dem ESP8266
 nach ~49 Tagen über, und die Waage soll monatelang durchlaufen.
 
+### Nachtrag: Button "Waage eG Jetzt messen"
+
+Beim Einrichten fiel auf, dass sich mit 360 min Voreinstellung nichts sinnvoll
+kontrollieren lässt - man müsste das Intervall dauernd hin- und herstellen.
+Der Button erzwingt eine sofortige Veröffentlichung von Gewicht **und** allen
+Diagnose-Entities und setzt den Intervall-Zähler zurück (nach einer manuellen
+Messung läuft die nächste planmäßige wieder ein volles Intervall später).
+
+Dabei fiel eine Inkonsistenz auf, die gleich mitbehoben wurde: Die Tara- und
+Kalibrier-Buttons aktualisierten nur `waage_gewicht`, nicht die
+Diagnose-Entities. Nach einem Tara stand also ein veralteter Rohwert in HA.
+Und **"Kalibrieren 0kg" verändert über `calib_raw_zero` auch den Span** - der
+Kalibrierfaktor wurde danach trotzdem nicht neu veröffentlicht. Beides
+korrigiert.
+
 Zwei bewusste Details:
 
 - **`minuten_seit_messung` ist NICHT `restore_value`.** Nach einem Neustart

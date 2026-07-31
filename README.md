@@ -116,6 +116,24 @@ steuert nur, wie oft ein Wert **nach Home Assistant** geschickt wird. Ein
 kurzes Intervall kostet also keine zusätzliche Messgenauigkeit und ein langes
 verschlechtert sie nicht.
 
+### "Die Werte aktualisieren sich so langsam"
+
+Das ist die Voreinstellung: **360 Minuten**. Für den Dauerbetrieb einer
+Stockwaage ist das richtig, beim Einrichten stört es.
+
+- **Einzelner Wert jetzt:** Button **"Waage eG Jetzt messen"** drücken. Er
+  veröffentlicht Gewicht und alle Diagnose-Entities sofort und startet den
+  Intervall-Zähler neu. Das Intervall selbst bleibt unverändert.
+- **Dauerhaft schneller zum Testen:** "Waage eG Messintervall" auf `1` stellen,
+  danach wieder hochsetzen.
+- **Am schnellsten:** das ESPHome-Log. Der HX711-Treiber loggt **jede Sekunde**
+  den Rohwert (`[D][hx711:031]: '': Got value 25830`). Dafür braucht es keine
+  Konfigurationsänderung, und man sieht sofort, wie ruhig das Signal ist.
+
+Zu beachten: Zwischen Auflegen und einem verlässlichen Wert liegen ohnehin
+~60 Sekunden Filterlaufzeit. Schneller als etwa eine Minute wird die Anzeige
+also nie sinnvoll reagieren, egal welches Intervall eingestellt ist.
+
 Nach einem Neustart kommt der erste Wert bereits nach ~1 Minute, unabhängig vom
 eingestellten Intervall - du musst also nicht bis zum Ablauf einer vollen
 Periode warten, um zu sehen, ob das Gerät läuft.
