@@ -24,7 +24,9 @@ ESPHome Device Builder Add-on in Home Assistant.
     günstiger z. B. YZC-161-Typ (aber Halbbrücke, Temperaturdrift höher)
 
 ## Funktionale Anforderungen (final)
-- Ausgabe in **kg**, gerundet auf **0,5 kg genau**
+- Ausgabe in **kg**, gerundet auf **0,1 kg genau**
+  (war ursprünglich 0,5 kg, auf Wunsch verfeinert - siehe Abschnitt
+  "Auflösung 0,1 kg: was das realistisch bedeutet")
 - **Kein festes `calibrate_linear`** im YAML - Kalibrierung läuft komplett
   dynamisch über zwei Buttons in Home Assistant:
   - **"Waage eG Kalibrieren 0kg"** - Waage leer stellen, dann drücken
@@ -71,6 +73,62 @@ erst auflegen/abräumen, **~1 Minute warten**, dann drücken.
 
 Netzbetrieb vorausgesetzt kostet das schnellere Sampling nichts. Bei einem
 späteren Umstieg auf Deep Sleep müsste diese Strategie neu gedacht werden.
+
+## Auflösung 0,1 kg: was das realistisch bedeutet
+
+Die Anzeige rundet auf 0,1 kg. Elektrisch ist das unkritisch, praktisch ist es
+eine Aussage über die *Auflösung*, nicht über die *Genauigkeit* - der
+Unterschied ist hier wichtig.
+
+**Elektrisch: reichlich Reserve.** Bei 4 × 50 kg (200 kg Vollausschlag,
+2 mV/V, ~4,3 V Speisung) entspricht 0,1 kg rund **4,3 µV** Brückensignal. Der
+HX711 rauscht laut Datenblatt mit ~50 nV(rms) bei `gain: 128` und 10 SPS - das
+sind grob **21 counts** pro Einzelmessung gegenüber ~1800 counts pro
+0,1-kg-Schritt. Nach der 60s-Mittelung bleibt davon nochmal deutlich weniger
+übrig. Der ADC ist also mit Abstand nicht der begrenzende Faktor; auch 0,01 kg
+wäre elektrisch darstellbar.
+
+**Praktisch begrenzen drei andere Dinge**, alle größer als 0,1 kg:
+
+1. **Temperaturdrift.** C3-Zellen driften typisch in der Größenordnung
+   0,02 %/10 K der Nennlast. Auf 200 kg sind das ~40 g pro 10 K. Draußen sind
+   20-30 K Tagesgang normal → **80-120 g**, also rund ein Anzeigeschritt.
+   Die Temperaturkompensation wurde auf Wunsch entfernt (siehe unten), damit
+   bleibt dieser Anteil unkorrigiert.
+2. **Eckenfehler** ohne getrimmte Junction-Box: 0,5-2 %, bei 50 kg Auflage
+   also **250 g bis 1 kg**. Das ist der mit Abstand größte Posten - Details in
+   `docs/waegezellen-verkabelung.md`.
+3. **Kriechen (Creep)** nach Lastwechsel: bei C3 ~0,0166 % über 30 min, auf
+   200 kg also **~33 g**.
+
+**Einordnung:** Die 0,1 kg sind sinnvoll für die *Veränderung* über Stunden und
+Tage - Trachteintrag, Futterverbrauch, Schwarmabgang. Genau darum geht es bei
+einer Stockwaage. Der *Absolutwert* wird realistisch auf ±0,1 bis ±0,5 kg genau
+sein, abhängig davon, ob die Junction-Box getrimmt ist. Die feinere Anzeige
+schadet dabei nicht, man sollte die letzte Stelle nur nicht als absolute
+Wahrheit lesen.
+
+**Ein Hebel, der noch offen ist: das Referenzgewicht.** Die Kalibrierung
+bestimmt den Span aus 0,5 kg und rechnet ihn auf bis zu 200 kg hoch - ein
+Faktor 400. Jeder Fehler beim Setzen des 0,5-kg-Punkts (Rauschen, aber vor
+allem ein außermittig liegendes Gewichtchen) wird mit hochskaliert. Ein
+schwereres Referenzgewicht (5 oder 10 kg) würde den Span deutlich robuster
+machen. Das ist bei 0,1 kg Auflösung der wirksamste einzelne Verbesserungshebel
+und wäre ein kleiner Umbau: eine zweite Number-Entity "Referenzgewicht" statt
+der fest verdrahteten 0,5. **Bewusst nicht umgesetzt**, weil die Anforderung
+explizit den 0,5-kg-Button nennt.
+
+### Umsetzung im Code
+- `accuracy_decimals: 1` (passt für 0,1)
+- Rundung als `std::round(kg * 10.0f) / 10.0f` - bewusst nicht `/0.1 * 0.1`,
+  weil 0,1 binär nicht exakt darstellbar ist
+- Das frühere Deadband `if (kg > -0.05 && kg < 0.05) kg = 0.0;` ist **entfallen**
+  - bei 0,1er-Rundung war es exakt deckungsgleich mit der Rundung selbst und
+  damit wirkungslos. Geblieben ist nur die Normalisierung von `-0.0` auf `0.0`,
+  damit HA keine negative Null anzeigt.
+- Folge davon: eine leere Waage kann jetzt statt exakt 0,0 auch mal ±0,1
+  anzeigen, wenn sie thermisch weggedriftet ist. Das ist ehrlicher als ein
+  Deadband, das echte kleine Gewichte verschluckt.
 
 ## Einstellbares Messintervall (ersetzt das feste 6h)
 
@@ -148,9 +206,13 @@ Intervall kostet keine Genauigkeit, ein langes verschlechtert sie nicht.
     und bedeutet "nichts veröffentlichen"
   - Die Lambda-Körper wurden 1:1 als eigenständiges C++17-Programm mit
     `g++ -Wall -Wextra` kompiliert (fehlerfrei) und durchgerechnet:
-    leer → 0,0 kg | 0,5kg-Punkt → 0,5 kg | 20 kg → 20,0 kg |
-    1,2 kg → 1,0 kg | 1,3 kg → 1,5 kg (Rundung korrekt) |
-    Tara bei 3 kg → 0,0 kg, danach 13 kg brutto → 10,0 kg
+    leer → 0,0 | 0,5kg-Punkt → 0,5 | 20 kg → 20,0 | 47,3 kg → 47,3 |
+    Rundungsgrenzen 1,24 → 1,2 und 1,26 → 1,3, ebenso 0,04 → 0,0,
+    0,06 → 0,1 und symmetrisch ins Negative | kein `-0.0`
+    (signbit geprüft) | Tara bei 3,4 kg → 0,0, danach 13,7 kg brutto → 10,3 |
+    **alle 2001 Stufen von 0 bis 200 kg in 0,1er-Schritten ohne Abweichung**
+    (bestätigt nebenbei, dass die `float`-Genauigkeit über den ganzen
+    Messbereich reicht)
   - Filterverhalten gegen `components/sensor/filter.cpp` verifiziert
     (siehe "Sampling-Strategie")
   - `update()` ist bei beiden Sensoren public aufrufbar: `TemplateSensor` und

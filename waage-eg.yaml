@@ -89,7 +89,7 @@ sensor:
       # weiter unten über die beiden Kalibrier-Buttons.
 
   # Das ist der Sensor, den du in Home Assistant siehst - live aus den
-  # beiden Kalibrierpunkten berechnet, Tara abgezogen, auf 0,5 kg gerundet
+  # beiden Kalibrierpunkten berechnet, Tara abgezogen, auf 0,1 kg gerundet
   - platform: template
     id: waage_gewicht
     name: "Waage eG Gewicht"
@@ -112,12 +112,15 @@ sensor:
         kg = (raw - id(calib_raw_zero)) * 0.5 / span;
       }
       kg -= id(tare_offset);
-      // Kleines Rauschen nahe 0 unterdrücken (leere Waage)
-      if (kg > -0.05 && kg < 0.05) {
-        kg = 0.0;
+      // Auf 0,1 kg genau runden. Bewusst *10 und /10 statt /0.1 und *0.1 -
+      // 0.1 ist binär nicht exakt darstellbar, der Umweg über die 10 ist
+      // numerisch sauberer.
+      float gerundet = std::round(kg * 10.0f) / 10.0f;
+      // Verhindert, dass bei minimal negativem Rohwert "-0.0" in HA landet
+      if (std::fabs(gerundet) < 0.001f) {
+        gerundet = 0.0f;
       }
-      // Auf 0,5 kg genau runden
-      return std::round(kg / 0.5) * 0.5;
+      return gerundet;
 
   # Wird zusammen mit dem Gewicht aktualisiert - dadurch sieht man in HA
   # am Zeitstempel dieser Entity, wann die letzte Messung durchlief

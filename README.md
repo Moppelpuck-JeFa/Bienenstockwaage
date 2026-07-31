@@ -16,7 +16,7 @@ ESP8266 (D1 Mini) mit HX711-Wägezellenverstärker und 4 Wägezellen.
 
 ## Was das Gerät kann
 
-- Gewicht in **kg**, gerundet auf **0,5 kg**
+- Gewicht in **kg**, gerundet auf **0,1 kg**
 - **Messintervall frei einstellbar aus Home Assistant** (1 Minute bis 7 Tage),
   Voreinstellung 360 min = 6 h
 - **Zwei-Punkt-Kalibrierung per Button aus HA** - kein festes `calibrate_linear`
@@ -46,6 +46,22 @@ drei Buttons gilt: erst auflegen bzw. abräumen, **~1 Minute warten**, dann drü
 Zarge) und lässt die Kalibrierung unangetastet. Umgekehrt setzt
 "Kalibrieren 0kg" ein bestehendes Tara zurück, weil es mit einem neuen
 Nullpunkt seine Bedeutung verliert.
+
+### Was 0,1 kg realistisch heißt
+
+Die **Auflösung** ist 0,1 kg - so fein wird angezeigt. Die **Genauigkeit** des
+Absolutwerts liegt realistisch bei ±0,1 bis ±0,5 kg, begrenzt durch
+Temperaturdrift, Kriechen und vor allem den Eckenfehler der Wägezellen (nicht
+durch die Elektronik - der HX711 hat hier reichlich Reserve).
+
+Für das, worum es bei einer Stockwaage geht - Gewichts*änderung* über Stunden
+und Tage - ist das genau richtig, weil sich diese Fehler bei gleichbleibendem
+Aufbau herauskürzen. Die letzte Nachkommastelle sollte man nur nicht als
+absolute Wahrheit lesen. Hintergrund in den Projektnotizen und in
+[`docs/waegezellen-verkabelung.md`](docs/waegezellen-verkabelung.md).
+
+Eine leere Waage kann dabei statt 0,0 auch mal ±0,1 anzeigen, wenn sie
+thermisch weggedriftet ist - dann hilft ein Druck auf "Tara".
 
 ## Messintervall einstellen
 

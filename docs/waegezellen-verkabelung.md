@@ -22,13 +22,17 @@ Empfindlichkeit bleibt also bei 2 mV/V - bezogen jetzt aber auf die
 Rechnung fürs Gefühl (bei ~4,3 V Speisung durch den HX711):
 
 - Vollausschlag: 2 mV/V × 4,3 V ≈ **8,6 mV** bei 200 kg
-- also ≈ 43 µV pro kg, ≈ **21 µV pro 0,5-kg-Schritt**
+- also ≈ 43 µV pro kg, ≈ **4,3 µV pro 0,1-kg-Schritt**
 
-Der HX711 hat bei `gain: 128` einen Eingangsbereich von ±20 mV auf 24 Bit. Die
-21 µV pro Anzeigeschritt liegen damit deutlich über dem Rauschen - die
-geforderte 0,5-kg-Auflösung ist mit 4 × 50 kg problemlos erreichbar. Weniger
-Kapazität (z. B. 4 × 20 kg) würde die Auflösung noch verbessern, aber ein voller
-Stock mit Zargen kann 100 kg+ wiegen, deshalb ist die Reserve sinnvoll.
+Der HX711 hat bei `gain: 128` einen Eingangsbereich von ±20 mV auf 24 Bit und
+rauscht laut Datenblatt mit ~50 nV(rms). Die 4,3 µV pro Anzeigeschritt liegen
+also rund zwei Größenordnungen über dem ADC-Rauschen - die geforderte
+**0,1-kg-Auflösung ist mit 4 × 50 kg elektrisch problemlos** erreichbar.
+
+Der begrenzende Faktor ist nicht der ADC, sondern die Mechanik: Temperaturdrift,
+Eckenfehler (Abschnitt 3) und Kriechen liegen alle in der Größenordnung
+0,1-1 kg. Weniger Kapazität (z. B. 4 × 20 kg) würde daran wenig ändern, und ein
+voller Stock mit Zargen kann 100 kg+ wiegen - die Reserve ist also sinnvoll.
 
 ## 2. Der Punkt, der vor dem Kauf geklärt sein muss: Eingangswiderstand
 
@@ -62,9 +66,11 @@ Zwei Wege:
   Lötklemmen-Parallelschaltung lohnt.
 - **Eigenbau ohne Potis**: billiger, aber der Eckenfehler bleibt. Bei
   C3-Zellen aus derselben Charge landet man typisch im Bereich 0,5-2 %. Auf
-  50 kg sind 1 % bereits 0,5 kg - also genau ein Anzeigeschritt. Das ist für
-  eine Trendmessung (Tracht, Futterverbrauch, Schwarmalarm) verkraftbar, für
-  einen absoluten Wert nicht.
+  50 kg sind 1 % bereits 0,5 kg - bei der eingestellten 0,1-kg-Auflösung
+  also **fünf Anzeigeschritte**. Das ist für eine Trendmessung (Tracht,
+  Futterverbrauch, Schwarmalarm) verkraftbar, weil sich der Fehler bei
+  gleichbleibender Lastverteilung herauskürzt. Für einen belastbaren
+  Absolutwert ist es zu viel.
 
 **Empfehlung:** Fertigbox mit Trimmpotis, wenn der Absolutwert zählt. Eigenbau
 reicht, wenn es primär um die Gewichts*änderung* geht - und dafür ist die Waage
