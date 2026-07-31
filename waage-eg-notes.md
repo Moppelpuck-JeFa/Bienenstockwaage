@@ -7,12 +7,18 @@ ESPHome Device Builder Add-on in Home Assistant.
 
 ## Hardware
 - **Chip:** ESP8266, Board `d1_mini`
-- **Wägezellen-Setup:** 4 Wägezellen (statt einer einzelnen), parallel
-  verschaltet - entweder direkt oder über eine externe Summier-/Junction-Box
-  (z. B. die "HX711 Junction Box" der Hiveeyes-Community). Elektrisch kommt
-  am ESP trotzdem nur **1 HX711-Signal** an, daher ändert sich am Code nichts.
-  Details, Fallstricke und Alternativen: siehe
-  [`docs/waegezellen-verkabelung.md`](docs/waegezellen-verkabelung.md)
+- **Wägezellen-Setup (VERBAUT):** 4 × 50 kg vom **YZC-161-Typ**, also
+  **Halbbrücken mit 3 Adern**. Die werden NICHT parallel geschaltet, sondern
+  zu **einer** Vollbrücke zusammengeschaltet (Ring aus den äußeren Adern, die
+  vier mittleren Adern werden alternierend zu E+/A+/E−/A−). Verkabelung und
+  Ohmmeter-Prüfung: [`docs/waegezellen-verkabelung.md`](docs/waegezellen-verkabelung.md),
+  Abschnitt 0.
+  Elektrisch kommt am ESP nur **1 HX711-Signal** an, am Code ändert sich nichts.
+- **Konsequenz für die Erwartungswerte:** Diese Zellen liefern typisch
+  ~1 mV/V statt 2 mV/V, also rund **9.000 counts/kg** statt 18.000. Für die
+  0,1-kg-Auflösung reicht das weiterhin (≈900 counts pro Schritt). Sie sind
+  aber nicht C3-klassifiziert - Temperaturdrift und Kriechen liegen über den
+  Werten im Abschnitt "Auflösung", der Absolutwert wird also weicher.
 - **HX711-Pins am ESP:** `DOUT = D1`, `CLK = D2`
 - **Empfohlene Wägezellen-Specs** (noch zu beschaffen):
   - Genauigkeitsklasse **C3 nach OIML R60**, Empfindlichkeit **2mV/V**
@@ -353,11 +359,15 @@ Intervall kostet keine Genauigkeit, ein langes verschlechtert sie nicht.
     kein Zählerüberlauf
 
 ## Offene Punkte für die Fortsetzung
-1. Wägezellen (4×, C3-Klasse) noch beschaffen - **vorher entscheiden:**
-   Eingangswiderstand 1000 Ω vs. 350 Ω (siehe docs/)
-2. Summier-/Junction-Box wählen: Fertigteil mit Trimmpotis (Eckenabgleich) vs.
-   Eigenbau ohne. Oder ganz anders: 4× HX711 mit Software-Summe statt
-   Parallelschaltung - Abwägung in `docs/waegezellen-verkabelung.md`
+1. ~~Wägezellen beschaffen~~ - erledigt, es sind 4× 50 kg Halbbrücken
+   (YZC-161-Typ) geworden. Damit ist die C3-/Vollbrücken-Empfehlung aus der
+   ursprünglichen Planung hinfällig; die Abschnitte 1-6 in
+   `docs/waegezellen-verkabelung.md` bleiben nur als Referenz für ein
+   späteres Upgrade stehen.
+2. **Verkabelung prüfen:** Ring-Verschaltung zur Vollbrücke und die
+   Ohmmeter-Gegenprobe (E+/E− und A+/A− müssen etwa gleich sein), siehe
+   `docs/waegezellen-verkabelung.md` Abschnitt 0. Ein "Load Cell Combinator"
+   nimmt einem die Löterei ab.
 3. Kalibrierung nach Hardware-Aufbau real durchführen: Referenzgewicht-Number
    auf die Masse des Prüfgewichts stellen → leer räumen → 1 min warten →
    "Kalibrieren 0kg" → Gewicht mittig auflegen → 1 min warten →

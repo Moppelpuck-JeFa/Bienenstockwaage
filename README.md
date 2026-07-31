@@ -126,13 +126,18 @@ Drei Diagnose-Entities beantworten die Frage, wo es klemmt. Sie stehen in HA
 unter "Diagnose" und werden bei jeder Messung aktualisiert.
 
 **1. "Waage eG Kalibrierfaktor"** — der wichtigste Wert. Erwartet werden bei
-4 × 50 kg grob **18.000 counts/kg**.
+4 × 50 kg grob **9.000 counts/kg** mit Halbbrücken-Zellen (~1 mV/V), bzw.
+~18.000 mit Vollbrücken (~2 mV/V).
 
 | Anzeige | Bedeutung |
 |---|---|
-| ~3.500 | Die Kalibrierung ist auf die Platzhalter zurückgefallen. Neu kalibrieren. |
+| **exakt 3.500** | Eindeutig: die Kalibrierung ist auf die Platzhalter zurückgefallen. Neu kalibrieren. |
 | sehr groß (>100.000) | Beim Kalibrieren war der Span zu klein — Gewicht lag nicht auf, oder es wurde nicht ~1 min gewartet. Neu kalibrieren. |
-| plausibel (~18.000) | Die Umrechnung ist in Ordnung, weiter bei Punkt 2. |
+| plausibel (~9.000) | Die Umrechnung ist in Ordnung, weiter bei Punkt 2. |
+
+Der Wert **3.500** ist die schärfste Diagnose, weil er sich exakt aus den
+Platzhaltern ergibt (1750 counts / 0,5 kg) und mit keiner realen Kalibrierung
+zufällig zusammenfällt.
 
 **2. "Waage eG Rohwert"** — der gefilterte HX711-Zählwert. Bei **unbelasteter,
 ruhender** Waage sollte der über Minuten nur um einige hundert counts wandern.

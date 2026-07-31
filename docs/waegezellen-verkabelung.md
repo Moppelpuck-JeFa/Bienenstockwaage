@@ -1,9 +1,68 @@
 # 4 Wägezellen an einen HX711 - Verkabelung und Entscheidungen
 
-Stand: offener Punkt aus den Projektnotizen (Zellen noch nicht beschafft).
-Dieses Dokument sammelt, was vor dem Kauf entschieden sein muss.
+**Verbaut sind die günstigen 50-kg-Zellen vom YZC-161-Typ - das sind
+HALBBRÜCKEN mit 3 Adern.** Für die gilt Abschnitt 0, nicht die
+Parallelschaltung aus Abschnitt 1. Die Abschnitte 1-6 beschreiben den
+Vollbrücken-Fall (4 Adern) und bleiben als Referenz stehen, falls später
+aufgerüstet wird.
+
+## 0. Halbbrücken (3 Adern): vier Zellen ergeben EINE Vollbrücke
+
+Eine 3-Adrige Zelle ist eine halbe Wheatstone-Brücke: zwei Dehnmessstreifen in
+Reihe, die mittlere Ader ist der Abgriff dazwischen. Unter Last wird der eine
+Streifen größer, der andere kleiner.
+
+**Diese Zellen dürfen NICHT parallel geschaltet werden.** Vier Halbbrücken
+werden zu genau einer Vollbrücke zusammengeschaltet - erst die hat die
+E+/E−/A+/A−, die der HX711 braucht.
+
+Adern pro Zelle: zwei **äußere** (oft schwarz und weiß) und eine **mittlere**
+(oft rot). Die Zellen werden zu einem **Ring** verbunden:
+
+```
+   Zelle1.außen2 --- Zelle2.außen1
+   Zelle2.außen2 --- Zelle3.außen1
+   Zelle3.außen2 --- Zelle4.außen1
+   Zelle4.außen2 --- Zelle1.außen1
+```
+
+Die vier **mittleren** Adern sind damit die vier Ecken der Brücke und gehen
+abwechselnd an den HX711:
+
+| Zelle | mittlere Ader an |
+|-------|------------------|
+| 1 | **E+** |
+| 2 | **A+** (Signal+) |
+| 3 | **E−** |
+| 4 | **A−** (Signal−) |
+
+Die Reihenfolge muss alternieren - Speisung und Signal dürfen nie an
+benachbarten Ecken liegen, sonst misst man Unsinn.
+
+**Prüfen mit dem Ohmmeter, bevor der HX711 drankommt:**
+- zwischen E+ und E− und zwischen A+ und A− sollte etwa **derselbe** Wert
+  stehen (bei diesen Zellen grob 1 kΩ)
+- weicht einer der beiden stark ab, ist der Ring falsch verbunden
+
+Fertigplatinen für genau diese Verschaltung heißen "Load Cell Combinator" und
+kosten wenige Euro - das spart die Löterei und die Fehlersuche.
+
+**Was das für die Rechnung ändert:** Gesamtkapazität sind weiterhin 4 × 50 kg =
+200 kg. Diese Zellen haben aber typisch **~1 mV/V** statt der 2 mV/V einer
+guten Vollbrücke, also ungefähr das **halbe Signal**: rund **9.000 counts/kg**
+statt 18.000. Für die 0,1-kg-Auflösung reicht das immer noch locker (≈900
+counts pro Anzeigeschritt), aber der Erwartungswert für die Diagnose-Entity
+"Kalibrierfaktor" liegt damit bei ~9.000, nicht bei ~18.000.
+
+**Und der Preis:** Diese Zellen sind nicht C3-klassifiziert. Temperaturdrift
+und Kriechen liegen deutlich über den Werten aus Abschnitt "Auflösung" in den
+Projektnotizen - der Absolutwert wird entsprechend weicher. Für Trendmessung
+(Tracht, Futterverbrauch, Schwarmalarm) reicht es, für belastbare
+Absolutgewichte nicht.
 
 ## 1. Das Grundprinzip: Parallel heißt Mitteln, nicht Addieren
+*(gilt für Vollbrücken-Zellen mit 4 Adern - für die verbauten Halbbrücken
+siehe Abschnitt 0)*
 
 Vier Vollbrücken-Zellen werden gleichnamig parallel geschaltet:
 
