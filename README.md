@@ -45,6 +45,8 @@ DS18B20 bewusst gemieden, weil es ein Boot-Strapping-Pin ist.
 - **Tara-Button**, unabhängig von der Kalibrierung
 - **Temperaturmessung** (DS18B20) — wird bewusst **nicht** in das Gewicht
   eingerechnet, sondern nur aufgezeichnet. Siehe unten.
+- **Verbindungsstatus und WLAN-Signal** als Diagnose — damit ein Ausfall
+  auffällt, statt dass die Sensoren still ihren letzten Wert behalten
 - Fallback-Hotspot, OTA-Updates, Webserver auf Port 80
 
 ## Inbetriebnahme

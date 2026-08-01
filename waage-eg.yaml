@@ -134,7 +134,7 @@ sensor:
   # beiden Kalibrierpunkten berechnet, Tara abgezogen, auf 0,1 kg gerundet
   - platform: template
     id: waage_gewicht
-    name: "Waage eG Gewicht"
+    name: "Gewicht"
     unit_of_measurement: "kg"
     accuracy_decimals: 1
     # Ohne state_class legt HA keine Langzeitstatistik an - dann bleiben
@@ -183,7 +183,7 @@ sensor:
   # (die Adressen stehen beim Start im Log).
   - platform: dallas_temp
     id: temperatur
-    name: "Waage eG Temperatur"
+    name: "Temperatur"
     update_interval: 60s
     resolution: 12
 
@@ -194,7 +194,7 @@ sensor:
   # nicht an der Umrechnung.
   - platform: template
     id: rohwert
-    name: "Waage eG Rohwert"
+    name: "Rohwert"
     icon: "mdi:counter"
     unit_of_measurement: "counts"
     accuracy_decimals: 0
@@ -210,7 +210,7 @@ sensor:
   # riesiger Wert), ist die Kalibrierung kaputt und muss wiederholt werden.
   - platform: template
     id: kalibrierfaktor
-    name: "Waage eG Kalibrierfaktor"
+    name: "Kalibrierfaktor"
     icon: "mdi:function-variant"
     unit_of_measurement: "counts/kg"
     accuracy_decimals: 0
@@ -227,7 +227,7 @@ sensor:
   # informativ - Bezugspunkt für eine mögliche spätere Kompensation.
   - platform: template
     id: kalibriert_bei
-    name: "Waage eG Kalibriert bei"
+    name: "Kalibriert bei"
     icon: "mdi:thermometer-check"
     unit_of_measurement: "°C"
     accuracy_decimals: 1
@@ -245,7 +245,7 @@ sensor:
   # nur die Eingabe für die nächste Kalibrierung ist.
   - platform: template
     id: kalibriert_mit
-    name: "Waage eG Kalibriert mit"
+    name: "Kalibriert mit"
     icon: "mdi:weight-kilogram"
     unit_of_measurement: "kg"
     accuracy_decimals: 3
@@ -257,8 +257,26 @@ sensor:
   # am Zeitstempel dieser Entity, wann die letzte Messung durchlief
   - platform: uptime
     id: waage_uptime
-    name: "Waage eG Betriebszeit"
+    name: "Betriebszeit"
     update_interval: never
+
+  # WLAN-Pegel. Die Waage steht draußen am Rand der Funkabdeckung - wenn sie
+  # aussetzt, sagt dieser Wert, ob es am Empfang liegt oder woanders.
+  # Richtwerte: besser als -70 dBm ist gut, unter -80 dBm wird es wackelig.
+  - platform: wifi_signal
+    name: "WLAN-Signal"
+    entity_category: diagnostic
+    update_interval: 300s
+
+# --- Verbindungsstatus ---
+# WICHTIG für ein Gerät, das im Dauerbetrieb nur alle paar Stunden sendet:
+# Fällt es aus, behalten alle Sensoren einfach ihren letzten Wert und in HA
+# sieht nichts nach Fehler aus. Dieser Sensor macht daraus ein sauberes
+# Online/Offline, auf das sich eine Benachrichtigung aufsetzen lässt.
+binary_sensor:
+  - platform: status
+    name: "Verbindung"
+    entity_category: diagnostic
 
 # --- Virtueller Tara-Button + Kalibrier-Buttons ---
 # Die Kalibrier- und Tara-Buttons lesen direkt den gefilterten Zustand von
@@ -272,7 +290,7 @@ button:
   # Der Intervall-Zaehler startet dabei neu: nach einer manuellen Messung
   # laeuft die naechste planmaessige wieder ein volles Intervall spaeter.
   - platform: template
-    name: "Waage eG Jetzt messen"
+    name: "Jetzt messen"
     icon: "mdi:refresh"
     on_press:
       - lambda: |-
@@ -291,7 +309,7 @@ button:
   # Nullt das aktuell aufliegende Gewicht (z. B. Verpackung/Behälter),
   # ändert NICHTS an der Kalibrierung selbst
   - platform: template
-    name: "Waage eG Tara"
+    name: "Tara"
     icon: "mdi:scale-balance"
     on_press:
       - lambda: |-
@@ -313,7 +331,7 @@ button:
 
   # Kalibrierung Schritt 1: Waage LEER lassen, ~1min warten, dann drücken
   - platform: template
-    name: "Waage eG Kalibrieren 0kg"
+    name: "Kalibrieren 0kg"
     icon: "mdi:target"
     on_press:
       - lambda: |-
@@ -347,7 +365,7 @@ button:
   # Kalibrierung Schritt 2: Referenzgewicht auflegen, dessen Masse vorher in
   # die Number-Entity "Referenzgewicht" eintragen, ~1min warten, dann drücken
   - platform: template
-    name: "Waage eG Kalibrieren Referenzgewicht"
+    name: "Kalibrieren Referenzgewicht"
     icon: "mdi:target"
     on_press:
       - lambda: |-
@@ -402,7 +420,7 @@ number:
   # 10 kg statt 0,5 kg sinkt dieser Hebel um den Faktor 20.
   - platform: template
     id: referenzgewicht
-    name: "Waage eG Referenzgewicht"
+    name: "Referenzgewicht"
     icon: "mdi:weight-kilogram"
     entity_category: config
     optimistic: true
@@ -422,7 +440,7 @@ number:
 
   - platform: template
     id: mess_intervall
-    name: "Waage eG Messintervall"
+    name: "Messintervall"
     icon: "mdi:timer-cog-outline"
     entity_category: config
     optimistic: true

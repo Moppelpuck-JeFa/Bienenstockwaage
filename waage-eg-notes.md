@@ -211,6 +211,35 @@ die Umrechnung spinnt. Neu sind zwei Diagnose-Entities:
 Damit ist die Frage "Hardware oder Software?" in zwei Blicken beantwortet.
 Fehlersuche-Anleitung im README.
 
+## Entity-Namen bereinigt (ändert die Entity-IDs!)
+
+Ursprünglich hieß jede Entity `name: "Waage eG ..."`. ESPHome stellt aber den
+`friendly_name` des Geräts ohnehin voran - in HA stand deshalb überall
+**"Waage eG Waage eG Gewicht"**, mit Entity-IDs wie
+`sensor.waage_waage_eg_gewicht`.
+
+Das Präfix ist jetzt aus allen 15 Entity-Namen raus. In HA heißen sie damit
+"Waage eG Gewicht" und die IDs werden zu `sensor.waage_eg_gewicht`.
+
+**Konsequenz:** Alle Entity-IDs ändern sich mit dem nächsten Flash. Betroffen
+sind das Dashboard `bienen-stockwaage` und die `source` des
+Derivative-Helpers "Waage Gewichtsänderung". Beides muss nach dem Flash
+nachgezogen werden - vorher existieren die neuen IDs nicht.
+
+Bewusst jetzt gemacht und nicht später: Je mehr Automationen und Karten auf den
+alten IDs aufbauen, desto teurer wird der Schnitt.
+
+## Neu: Verbindungsstatus und WLAN-Signal
+
+Zwei Diagnose-Entities, die bei einem Gerät im Feld praktisch Pflicht sind:
+
+- **`binary_sensor` Platform `status`** → "Verbindung". Ohne den fällt ein
+  Ausfall gar nicht auf: Bei einem Messintervall von Stunden behalten alle
+  Sensoren einfach ihren letzten Wert, und nichts sieht in HA nach Fehler aus.
+  Darauf setzt die Offline-Benachrichtigung auf.
+- **`wifi_signal`** → "WLAN-Signal", alle 5 min. Sagt bei Aussetzern, ob es am
+  Empfang liegt. Richtwerte: besser als −70 dBm ist gut, unter −80 dBm wackelig.
+
 ## Auflösung 0,1 kg: was das realistisch bedeutet
 
 Die Anzeige rundet auf 0,1 kg. Elektrisch ist das unkritisch, praktisch ist es
