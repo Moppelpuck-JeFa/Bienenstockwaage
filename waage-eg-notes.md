@@ -522,6 +522,58 @@ nur für eine belastbare Intraday-Kurve nicht.
      HA-Automation, die "Waage eG Messintervall" z. B. im Frühjahr auf 60
      und im Winter auf 1440 setzt
 
+## Home-Assistant-Seite: Helfer, Automationen, Dashboard
+
+Alles Folgende lebt **in HA**, nicht in dieser YAML. Hier dokumentiert, damit
+der Zusammenhang nicht verloren geht.
+
+### Helfer
+
+| Helfer | Typ | Zweck |
+|---|---|---|
+| `sensor.waage_eg_waage_gewichtsanderung` | derivative, 6 h, kg/d | Trend: Eintrag bzw. Verbrauch |
+| `sensor.waage_eg_waage_gewichtsverlust_kurz` | derivative, 20 min, kg/h | **Schwarm-Signal** |
+| `sensor.waage_eg_waage_tagesbilanz` | statistics, `change`, 24 h | Trachtbilanz |
+| `binary_sensor.waage_eg_waage_futtervorrat_kritisch` | threshold, `lower: 15`, Hysterese 0,5 | Winterfutter-Warnung |
+
+**Warum zwei Ableitungen mit verschiedenen Fenstern:** Der 6h-geglättete
+Sensor bügelt einen Schwarm (1,5-3 kg in Minuten) vollständig weg - genau das
+ist ja seine Aufgabe. Der Alarm braucht deshalb ein eigenes, kurzes Fenster.
+Ein Helfer kann nicht beides.
+
+**Warum `statistics/change/24h` und nicht ein Bastelwerk aus `input_number`
+plus Automation:** Der Wert vergleicht immer *jetzt gegen dieselbe Uhrzeit
+gestern*. Damit ist die "immer zur selben Tageszeit ablesen"-Methode gegen die
+Temperaturdrift schon eingebaut, ohne eine einzige Automation.
+
+### Automationen
+
+| Automation | Auslöser | Verhalten |
+|---|---|---|
+| `Bienen: Schwarm-Alarm` | Schwarm-Signal unter −3 kg/h | Nur 9-18 Uhr (Schwärme gehen tagsüber ab). Push + persistente Meldung |
+| `Bienen: Messintervall nach Saison` | täglich 3 Uhr | Mai/Juni `15`, März/April + Juli/Aug `60`, sonst `720` |
+| `Bienen: Futtervorrat kritisch` | Schwellwert 2 h lang überschritten | Push + Meldung mit 24h-Bilanz |
+| `Bienen: Waage offline` | `binary_sensor.waage_eg_verbindung` 1 h aus | Meldung, wird bei Rückkehr automatisch zurückgenommen |
+
+**Der Zusammenhang zwischen Alarm und Intervall:** Bei 360 min Messintervall
+merkt man einen Schwarm frühestens sechs Stunden später - dann hängt er längst
+woanders. Deshalb setzt die Saison-Automation in der Schwarmzeit auf 15 min.
+Ohne sie ist der Schwarm-Alarm weitgehend wirkungslos.
+
+**Nebenwirkung:** Die Saison-Automation überschreibt eine manuelle
+Intervall-Einstellung beim nächsten Lauf um 3 Uhr. Zum längeren Testen die
+Automation vorübergehend ausschalten.
+
+### Noch anzupassen
+- **Die Futter-Schwelle von 15 kg ist ein Platzhalter.** Sie muss auf den
+  realen Stock angepasst werden (Beute + Waage + Mindestfutter). Solange nur
+  ein Prüfgewicht aufliegt, steht der Sensor dauerhaft auf "kritisch".
+- Der Schwarm-Schwellwert −3 kg/h ist geschätzt und sollte nach der ersten
+  echten Saison nachjustiert werden.
+
+### Dashboard
+`bienen-stockwaage`, drei Ansichten: Übersicht, Auswertung, Technik.
+
 ## Umgebungs-Infos (Home Assistant-seitig)
 - ESPHome Device Builder Add-on: Slug `5c53de3b_esphome`, Port `6052`,
   `home_assistant_dashboard_integration: true`, `leave_front_door_open: true`
