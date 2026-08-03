@@ -1,0 +1,234 @@
+# Bienenstockwaage "waage-eg" — Übergabe-Kontext für Claude Code
+
+> Diese Datei fasst den aktuellen Stand des Projekts zusammen. Sie ist so geschrieben,
+> dass eine neue Claude-Instanz (z. B. in Claude Code) direkt produktiv weiterarbeiten kann,
+> ohne den gesamten bisherigen Chatverlauf zu kennen.
+
+---
+
+## 1. Worum geht es
+
+Eine Bienenstockwaage auf Basis eines ESP8266 (D1 Mini) mit ESPHome, angebunden an
+Home Assistant (HA). Sie wiegt einen Bienenstock kontinuierlich, damit man Futtervorrat,
+Gewichtsverlauf und Schwarm-Ereignisse (plötzlicher Gewichtsabfall) erkennen kann.
+
+**Status: Läuft bereits produktiv.** Gerät ist geflasht und kalibriert, die komplette
+HA-Seite (7 Helfer, 4 Automationen, 3-Ansichten-Dashboard) ist eingerichtet. Es handelt
+sich jetzt um Feinschliff, offene Messungen und mögliche Erweiterungen — nicht mehr um
+einen Neuaufbau von Null.
+
+**Repo:** `github.com/Moppelpuck-JeFa/Bienenstockwaage` (privat), Branch `main`.
+
+**Wichtig:** Workflow-Sprache ist Deutsch — Code-Kommentare, YAML-Labels, Entity-Namen
+und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
+
+---
+
+## 2. Hardware (verbaut)
+
+| Teil | Wert |
+|---|---|
+| Board | ESP8266, `d1_mini` |
+| HX711 | `dout_pin: D0` (GPIO16), `clk_pin: D1` (GPIO5), gain 128 |
+| Wägezellen | 4× 50 kg **YZC-161-Typ = Halbbrücken (3-adrig)**, im Ring zu **einer** Vollbrücke verschaltet |
+| DS18B20 (Temperatur) | Pin `D5` (GPIO14), externer Pull-up 4,7 kΩ gegen **3V3** |
+
+**Gemessene Istwerte:**
+- Kalibrierfaktor: **−20.840 counts/kg** (negativ = invertierte Signalpolarität, funktional unkritisch)
+- Kalibriert mit 2,218 kg Referenzgewicht bei 21,5 °C
+- Rohwert leer: 25.830 counts → ~470 kg rechnerischer ADC-Vorrat (mechanisches Limit von 200 kg greift vorher)
+- WLAN-Signal: −70 dBm (Grenzbereich, ggf. beobachten)
+
+---
+
+## 3. Zentrale Design-Entscheidungen (und warum)
+
+### Kalibrierung
+- **Kein `calibrate_linear` im YAML.** Stattdessen Zwei-Punkt-Kalibrierung komplett aus
+  HA heraus über zwei virtuelle Buttons, Werte liegen in `globals` mit `restore_value: yes`.
+- `calib_kg_ref` (die tatsächlich beim Kalibrieren gespeicherte Masse) ist **bewusst
+  getrennt** von der Number-Entity `Referenzgewicht` (nur Eingabefeld für die *nächste*
+  Kalibrierung). Sonst würde ein späteres Ändern der Zahl rückwirkend alle Messwerte
+  umskalieren.
+- Span-Prüfung: bricht ab, wenn Rohwert-Differenz < 500 counts (häufigster Fehler:
+  Gewicht nicht aufgelegt oder die 60 s Filterlaufzeit nicht abgewartet).
+- Referenzgewicht bewusst **schwer wählen** — je kleiner die Referenzmasse, desto größer
+  der Ablesefehler-Hebel (Beispiel: 20 counts Fehler → 222 g Fehler bei 0,5 kg Referenz,
+  aber nur 11 g bei 10 kg Referenz).
+
+### Sampling / Taktung
+- HX711 läuft mit `update_interval: 1s` (schnell), damit die Kalibrier-/Tara-Buttons
+  immer einen frischen gefilterten Wert lesen — auch wenn HA selbst nur alle paar
+  Stunden einen Wert bekommt.
+- HA-Taktung ist über einen `interval: 60s`-Block entkoppelt, gesteuert durch die
+  Number-Entity `Messintervall`. Sichtbare Sensoren stehen auf `update_interval: never`.
+- Filterkette: `median` (5 Werte) → `sliding_window_moving_average` (12 × 5 s ≈ 60 s).
+- Minutenzähler statt `millis()`, weil `millis()` nach ~49 Tagen überläuft.
+
+### Kritische Plattform-Fallstricke (ESP8266 / ESPHome)
+- **`restore_from_flash: true` ist ZWINGEND.** Ohne diese Zeile landen alle
+  `restore_value`-Globals nur im RTC-RAM → gehen bei jedem Stromausfall verloren,
+  Kalibrierung fällt auf Platzhalter zurück. War Ursache eines realen Fehlerbilds.
+- **GPIO16 (D0) kann keine Interrupts** — für HX711 egal (Treiber pollt aktiv), aber
+  GPIO16 ist der Deep-Sleep-Weckpin → **Batteriebetrieb per Deep Sleep ist damit
+  ausgeschlossen**, solange DOUT auf D0 liegt.
+- **D4 (GPIO2) gemieden** — Boot-Strapping-Pin.
+
+### Auflösung
+- 0,1 kg, Rundung als `round(kg*10)/10` (nicht `/0.1*0.1`, da 0,1 binär nicht exakt
+  darstellbar ist).
+- Elektrisch unkritisch (0,1 kg ≈ 1.800 counts vs. ~21 counts HX711-Rauschen).
+- **Begrenzend ist die Mechanik**, nicht der ADC: Eckenfehler ohne getrimmte Junction-Box
+  0,5–2 % (250 g – 1 kg bei 50 kg), Temperaturdrift, Kriechen.
+
+### Temperatur
+- DS18B20 **misst**, es wird **nicht kompensiert** — Koeffizient ist unbekannt, ein
+  geratener Koeffizient würde die Messung unbemerkt verschlechtern.
+- `calib_temp` wird bei Nullpunkt-Kalibrierung mitgespeichert (nicht nachträglich
+  rekonstruierbar).
+
+### Namensgebung
+- Entity-Namen **ohne** `"Waage eG "`-Präfix im YAML, weil ESPHome den `friendly_name`
+  ohnehin voranstellt (sonst "Waage eG Waage eG Gewicht" in HA).
+
+### HA-Seite (Sensoren/Logik)
+- **Zwei getrennte Derivative-Fenster:** 6 h → kg/d (Trend) und 20 min → kg/h (Schwarm).
+  Ein einzelner Helfer kann nicht beides leisten, weil der geglättete Sensor kurzfristige
+  Schwarm-Sprünge (1,5–3 kg in Minuten) wegbügelt.
+- **Tagesbilanz als `statistics`-Helfer** (`state_characteristic: change`, `max_age: 24h`)
+  statt `input_number` + Automation — vergleicht automatisch "jetzt gegen dieselbe
+  Uhrzeit gestern".
+- **Futterkontrolle als Template-Binary-Sensor statt `threshold`-Helfer** (bewusste
+  Ausnahme von der Regel "nimm den nativen Helfer"): `threshold` akzeptiert nur feste
+  Zahlen, keine Entity-Referenz für die Grenze. Hysterese (0,5 kg) wird im Template über
+  `this.state` selbst nachgebaut.
+- **Futtervorrat-Anzeige getrennt von Kritisch-Erkennung:** `sensor.futtervorrat`
+  (Gewicht minus Leergewicht Beute) ist nur die Anzeige; die Kritisch-Prüfung selbst
+  vergleicht direkt das Rohgewicht gegen `input_number.mindestgewicht_mit_futter`
+  (beide auf derselben Basis: Gesamtgewicht inkl. Beute).
+
+---
+
+## 4. HA-Werkzeug-Fallstricke (für die Arbeit mit ha-mcp / Home Assistant)
+
+- `ha_config_set_helper(action="update")` validiert gegen eine falsche Entity-Liste →
+  Helfer **löschen und neu anlegen**, `create` funktioniert zuverlässig.
+- Dashboard: `grid_options.columns: "full"` = volle Breite **der Sektion**, nicht der
+  Ansicht → für volle Breite `column_span` auf der Sektion setzen.
+- Tile-Feature `numeric-input` kennt nur `style: buttons|slider`. Für **Tippfelder**
+  eine `entities`-Karte verwenden (rendert Number-Entities gemäß `mode: box`).
+- Screenshot-Add-on **`0f1cc410_puppet`** (balloob) ist das echte; `81f33d0f_puppet` ist
+  eine Test-Attrappe mit synthetischen PNGs.
+- Template-Helfer per ha-mcp: `next_step_id` (Sub-Typ) und die eigentlichen Felder
+  können in **einem** Aufruf übergeben werden.
+- Gated Write-Tools verlangen im strict-BPS-Modus ein `BestPracticeKey`
+  (Attestation-Phrase aus dem Skill-Inhalt, rotiert stündlich) — vorher
+  `ha_get_skill_guide` lesen und Key entnehmen. Mit `MandatoryBPS: false` entfällt das
+  für den Rest der Session.
+- Dashboard-Edits: `ha_config_get_dashboard` liefert `config_hash`, dann
+  `ha_config_set_dashboard(python_transform=..., config_hash=...)` statt vollem
+  Config-Replace verwenden.
+- `hx711.tare` existiert **nicht** als ESPHome-Action — Tara wird über einen
+  globals-basierten Lambda-Workaround gelöst.
+- ESPHome Device Builder Add-on (Slug `5c53de3b_esphome`, Port `6052`) braucht für
+  Dashboard-API-Zugriff zwei nicht offensichtliche Einstellungen: Port `6052/tcp` auf
+  Host-Port `6052` gemappt, und `leave_front_door_open: true` — ohne beides: HTTP 403.
+- WebSocket-Log-Streaming über `ha_manage_addon` bricht nach ~2,5 s ab (kein Gerätefehler)
+  — für aktuelle Sensorwerte stattdessen `ha_search` mit Gerätename nutzen.
+- `ha_get_device(integration: esphome)` liefert leer, wenn Geräte über MQTT statt der
+  ESPHome-HA-Integration verbunden sind → dann `integration: mqtt` verwenden.
+
+---
+
+## 5. Code-Struktur des Repos
+
+```
+Bienenstockwaage/
+├── waage-eg.yaml                      # ESPHome-Konfiguration (einzige Codedatei)
+├── secrets.yaml.example               # Vorlage: wifi_ssid, wifi_password,
+│                                       #   ap_fallback_password, api_encryption_key, ota_password
+├── waage-eg-notes.md                  # Entscheidungen, Begründungen, HA-Seite
+├── docs/waegezellen-verkabelung.md    # Abschnitt 0 = Halbbrücken-Ring (relevant),
+│                                       #   Abschnitte 1-6 = Vollbrücken-Referenz
+├── README.md                          # Inbetriebnahme, Kalibrieren, Fehlersuche
+└── .gitignore                         # secrets.yaml, .esphome/, *.bin
+```
+
+**Nicht im Repo (lebt nur in HA):** Helfer, Automationen, Dashboard `bienen-stockwaage`.
+
+Die vollständigen YAML-Codefragmente (Globals, HX711-Sensor, Kalibrier-Button, Taktgeber)
+sowie die Tabellen der HA-Helfer und -Automationen liegen in den Originaldateien
+`claude_waage-eg-kontext.md` bzw. `Leergewicht__mindestgewicht_mit_Futter` — diese
+sollten 1:1 als Referenz mit ins neue Arbeitsverzeichnis übernommen werden, da hier nur
+die Entscheidungen zusammengefasst sind, nicht jede Codezeile.
+
+---
+
+## 6. Wägezellen-Verkabelung (Halbbrücken → Vollbrücke)
+
+Äußere Adern der vier Zellen zu einem **Ring** verbinden (Z1→Z2→Z3→Z4→Z1). Die vier
+**mittleren** Adern sind die Brückenecken und gehen alternierend an den HX711:
+
+| Zelle | mittlere Ader an |
+|---|---|
+| 1 | E+ |
+| 2 | A+ |
+| 3 | E− |
+| 4 | A− |
+
+Gegenprobe mit Ohmmeter: E+/E− und A+/A− müssen etwa gleich sein (~1 kΩ).
+
+---
+
+## 7. Offene Punkte / nächste Schritte
+
+**Sofort anzupassen (Platzhalter):**
+- `input_number.leergewicht_beute` und `input_number.mindestgewicht_mit_futter` stehen
+  beide noch auf 0,0 kg. Reale Werte eintragen (Beute leer wiegen; Mindestgewicht =
+  Beute + Bienen + Mindestfutterreserve). Bis dahin liefert `binary_sensor.futtervorrat_kritisch`
+  fälschlich "nicht kritisch".
+- Schwarm-Schwellwert von −3 kg/h nach der ersten echten Saison nachjustieren.
+
+**Offene Messung:**
+- Temperaturdrift bestimmen: konstante bekannte Last auflegen, Messintervall auf 15 min,
+  einige Tage laufen lassen, dann Rohwert gegen Temperatur in der Dashboard-Ansicht
+  "Auswertung" vergleichen.
+  - Parallele Kurven → systematische Drift, Kompensation würde sich lohnen.
+  - Breit streuende Punktwolke → Eckengradienten dominieren, ein einzelner Sensor kann
+    das nicht korrigieren → dann auf Tagesbilanz verlassen.
+
+**Vertagt:**
+- Deep Sleep / Batteriebetrieb — blockiert, solange DOUT auf D0 (GPIO16, Weckpin) liegt.
+  Erfordert Umverdrahtung und neue Sampling-Strategie.
+
+**Erwägenswert (nicht entschieden):**
+- Junction-Box mit Trimmpotis für Eckenabgleich (größter Einzelfehler).
+- Alternative Topologie: 4× HX711 mit gemeinsamem CLK und Software-Summe statt
+  Parallelschaltung.
+- WLAN-Pegel −70 dBm beobachten, ggf. Antennenposition prüfen.
+
+**Aus früheren Sessions noch offen:**
+- Frage zur `secrets.yaml`-Nutzung in ESPHome war zuletzt noch nicht abschließend geklärt.
+
+---
+
+## 8. Vorschlag: Einstiegs-Prompt für Claude Code
+
+Kopiere diesen Block als ersten Prompt in Claude Code, nachdem du das Repo geklont hast:
+
+```
+Ich arbeite an einer ESPHome-Bienenstockwaage (ESP8266 D1 Mini + HX711), die bereits
+produktiv läuft und in Home Assistant eingebunden ist. Im Repo-Root liegt die Datei
+waage-eg-claude-code-kontext.md mit der vollständigen Zusammenfassung aller bisherigen
+Entscheidungen, Fallstricke und offenen Punkte — bitte lies sie zuerst komplett.
+
+Aktuell will ich als Nächstes: [HIER EINTRAGEN, z. B. "die Temperaturdrift-Messung
+auswerten" oder "input_number.leergewicht_beute korrekt setzen" oder "die
+secrets.yaml-Frage klären"].
+
+Bitte halte dich an die dort dokumentierten Konventionen (deutsche Sprache in Code/
+Doku, keine calibrate_linear-Kalibrierung, restore_from_flash: true nicht entfernen,
+kein Deep Sleep wegen GPIO16).
+```
+
+Trag im Platzhalter einfach ein, womit du als Nächstes weitermachen willst.
