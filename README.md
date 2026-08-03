@@ -11,6 +11,8 @@ ESP8266 (D1 Mini) mit HX711-Wägezellenverstärker und 4 Wägezellen.
 | [`secrets.yaml.example`](secrets.yaml.example) | Vorlage für die Zugangsdaten (kopieren nach `secrets.yaml`) |
 | [`waage-eg-notes.md`](waage-eg-notes.md) | Projektnotizen: alle Entscheidungen, Anforderungen, offene Punkte |
 | [`docs/waegezellen-verkabelung.md`](docs/waegezellen-verkabelung.md) | Verkabelung der 4 Zellen, Junction-Box, Kaufkriterien |
+| [`docs/deep-sleep-vorbereitung.md`](docs/deep-sleep-vorbereitung.md) | Was Batterie-/Solarbetrieb braucht: Verdrahtung, Strombilanz, YAML |
+| [`docs/sessionbericht-2026-08-03.md`](docs/sessionbericht-2026-08-03.md) | Temperaturdrift ausgewertet, Durchsichtmodus, Kalibrierungsverlust |
 
 `secrets.yaml` selbst ist per `.gitignore` ausgeschlossen und gehört nicht ins Repo.
 
@@ -271,6 +273,21 @@ gemessen: **−17.900 counts/kg**.
 Der Wert **3.500** ist die schärfste Diagnose, weil er sich exakt aus den
 Platzhaltern ergibt (1750 counts / 0,5 kg) und mit keiner realen Kalibrierung
 zufällig zusammenfällt.
+
+**Wann das passiert:** nicht nur bei Stromausfall ohne `restore_from_flash`.
+**Auch ein Flash, der neue `globals` hinzufügt, setzt die Kalibrierung zurück** —
+real beobachtet am 03.08.2026. Nach jedem Flash also den Kalibrierfaktor prüfen.
+
+### Nach dem Verlust immer BEIDE Schritte kalibrieren
+
+Wird nur „Kalibrieren Referenzgewicht" gedrückt, bleibt der Nullpunkt auf dem
+Platzhalter 0 und der Kalibrierfaktor landet bei rund der Hälfte des richtigen
+Werts. Die Anzeige sieht dabei **korrekt aus, solange das Prüfgewicht aufliegt**,
+und ist bei jeder anderen Last falsch.
+
+Der verräterische Hinweis steht in **„Kalibriert bei": unbekannt.** Die
+Temperatur wird ausschließlich beim Nullpunkt gespeichert — steht dort nichts,
+wurde „Kalibrieren 0 kg" nie ausgeführt.
 
 ### Warum der Faktor negativ ist — und warum das in Ordnung ist
 

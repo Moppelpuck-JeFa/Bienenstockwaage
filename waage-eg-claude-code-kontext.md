@@ -71,6 +71,11 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
 - **`restore_from_flash: true` ist ZWINGEND.** Ohne diese Zeile landen alle
   `restore_value`-Globals nur im RTC-RAM → gehen bei jedem Stromausfall verloren,
   Kalibrierung fällt auf Platzhalter zurück. War Ursache eines realen Fehlerbilds.
+- **Aber es schuetzt NICHT gegen einen Flash, der neue `globals` hinzufuegt.**
+  Am 03.08. real passiert: Faktor fiel unmittelbar nach dem Flash auf den
+  Platzhalter 3.500. **Nach jedem Flash den Kalibrierfaktor pruefen** und im
+  Zweifel BEIDE Kalibrierschritte fahren — nur den Referenzpunkt zu setzen
+  ergibt einen etwa halbierten Faktor bei plausibel aussehender Anzeige.
 - **GPIO16 (D0) ist der einzige Deep-Sleep-Weckpin** des ESP8266 (RTC-Timer zieht
   ihn auf Masse, muss deshalb an RST liegen). DOUT lag ursprünglich dort und hat
   Batteriebetrieb blockiert; **inzwischen auf D6 (GPIO12) umgezogen**, GPIO16 ist
@@ -202,6 +207,12 @@ Gegenprobe mit Ohmmeter: E+/E− und A+/A− müssen etwa gleich sein (~1 kΩ).
 ## 7. Offene Punkte / nächste Schritte
 
 **Sofort anzupassen (Platzhalter):**
+- **NEU KALIBRIEREN, beide Schritte.** Beim Flash am 03.08. ging die
+  Kalibrierung verloren (Faktor fiel auf den Platzhalter 3.500); die
+  anschliessende Neukalibrierung setzte nur den Referenzpunkt, nicht den
+  Nullpunkt. Der Faktor steht dadurch bei −8.770 statt −20.840 und die Waage
+  misst falsch. Erkennungszeichen: "Kalibriert bei" ist leer.
+  Details in [`docs/sessionbericht-2026-08-03.md`](docs/sessionbericht-2026-08-03.md).
 - **Schwarm-Alarm gegen den Durchsichtmodus sperren** — sonst loest er nach
   jeder Durchsicht aus, bei der Gewicht abgenommen wurde. Bedingung siehe
   Abschnitt "Durchsichtmodus".

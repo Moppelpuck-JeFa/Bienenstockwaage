@@ -204,6 +204,66 @@ unkritisch, weil sich die gespeicherten Werte nur bei manueller Bedienung änder
 Referenzgewicht) - auch die fielen nach Stromverlust auf ihre Voreinstellung
 zurück.
 
+### Nachtrag: `restore_from_flash` schuetzt NICHT gegen einen Flash mit neuen Globals
+
+Am 03.08.2026 real beobachtet und in der HA-Historie belegt:
+
+| Zeit | Kalibrierfaktor | Kalibriert mit |
+|---|---|---|
+| bis 12:16 | −20.839,9 | 2,218 kg |
+| 12:16:58 | *unavailable* (Flash Durchsichtmodus) | |
+| **12:18:14** | **3.500,0** | **0,5 kg** |
+
+Der Flash brachte zwei **neue** Globals mit (`durchsicht_restminuten`,
+`nachlauf_minuten`). Danach standen alle Kalibrierwerte auf ihren
+`initial_value`-Platzhaltern - obwohl `restore_from_flash: true` gesetzt ist und
+kein Stromausfall vorlag.
+
+**Merksatz: Jeder Flash, der die Menge der `globals` aendert, kann die
+Kalibrierung zuruecksetzen.** `restore_from_flash` schuetzt gegen Stromausfall,
+nicht gegen eine veraenderte Preferences-Belegung.
+
+**Konsequenz fuer jede kuenftige YAML-Erweiterung:**
+
+1. Vor dem Flash "Kalibrierfaktor", "Kalibriert mit" und "Kalibriert bei"
+   notieren - oder besser den **Rohwert bei leerer Waage**, aus dem sich der
+   Nullpunkt rekonstruieren laesst.
+2. Nach dem Flash "Kalibrierfaktor" pruefen. Exakt **3.500** heisst: verloren.
+3. Dann **beide** Kalibrierschritte fahren, nicht nur den Referenzpunkt
+   (siehe naechster Abschnitt).
+
+### Die halbe Neukalibrierung - ein Fehlerbild, das plausibel aussieht
+
+Nach obigem Verlust wurde um 13:13 nur **"Kalibrieren Referenzgewicht"**
+gedrueckt, nicht "Kalibrieren 0kg". Ergebnis: Faktor **−8.770,6** statt
+−20.840, also weniger als die Haelfte.
+
+Das ist kein Hardwarefehler. `calib_raw_zero` stand noch auf dem Platzhalter
+**0**, und damit kollabiert die Umrechnung
+
+```
+kg = (raw − calib_raw_zero) * calib_kg_ref / (calib_raw_ref − calib_raw_zero)
+```
+
+zu `kg = raw / Faktor`. Genau das war messbar: Gewicht 2,3 kg bei Rohwert
+−20.079,8 und Faktor −8.770,6 - die Division geht exakt auf.
+
+**Die Waage sieht dabei richtig aus, solange das Referenzgewicht aufliegt**, und
+liegt bei jeder anderen Last daneben. Der verraeterische Hinweis ist
+**"Kalibriert bei" = unbekannt**: `calib_temp` wird ausschliesslich beim
+Nullpunkt gesetzt. Steht dort nichts, wurde "Kalibrieren 0kg" nie gedrueckt.
+
+Gegenprobe, dass die Hardware in Ordnung ist - der echte Nullpunkt laesst sich
+aus dem alten Faktor zurueckrechnen:
+
+```
+−20.080 counts + 2,218 kg × 20.840 counts/kg = +26.143 counts
+```
+
+Das deckt sich mit den **25.830 counts** Leer-Rohwert aus dem Abschnitt
+"Negative Signalpolaritaet". Der Pin-Wechsel von D0 auf D6 hat die Messung also
+nicht veraendert; es fehlte nur der Nullpunkt.
+
 ### Zweiter Fund: die Span-Prüfung war zu schwach
 Der Kalibrier-Button prüfte nur auf `raw == calib_raw_zero`, also exakte
 Gleichheit. Der praktisch häufigere Fehler ist ein *fast* gleicher Rohwert -
