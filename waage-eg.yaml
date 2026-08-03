@@ -98,12 +98,16 @@ sensor:
     id: hx711_raw_counts
     # Dieser Sensor ist nur intern - HA bekommt den fertigen Wert weiter unten
     internal: true
-    # D0 = GPIO16: funktioniert hier, weil der HX711 DOUT aktiv treibt (kein
-    # Pull-up nötig) und der ESPHome-Treiber pollt statt Interrupts zu nutzen -
-    # GPIO16 kann auf dem ESP8266 nämlich keine Interrupts.
-    # ACHTUNG für später: GPIO16 ist der Deep-Sleep-Weckpin. Solange DOUT hier
-    # hängt, ist Batteriebetrieb per Deep Sleep nicht mehr möglich.
-    dout_pin: D0
+    # D6 = GPIO12. Bewusst NICHT D0/GPIO16, obwohl das elektrisch ginge:
+    # GPIO16 ist der einzige Pin, über den der ESP8266 aus dem Deep Sleep
+    # aufwachen kann (RTC-Timer zieht GPIO16 auf Masse, deshalb muss er an RST
+    # liegen). Solange DOUT dort hängt, ist Batteriebetrieb ausgeschlossen -
+    # und der Zielaufbau im Garten läuft auf Solar. GPIO16 bleibt deshalb frei.
+    # GPIO12 ist kein Boot-Strapping-Pin und sonst unbelegt.
+    # ACHTUNG: Diese Zeile gilt nur zusammen mit der Verdrahtung. Wird sie ohne
+    # das Umstecken geflasht, liest der Treiber ins Leere.
+    # Hintergrund: docs/deep-sleep-vorbereitung.md
+    dout_pin: D6
     clk_pin: D1
     gain: 128
     # WICHTIG: Der HX711 wird bewusst SCHNELL abgefragt (1s), auch wenn der

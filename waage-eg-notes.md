@@ -71,12 +71,17 @@ Nebenbefund: Der Brücken-Offset entspricht nur **1,44 kg** virtueller Last, die
 Brücke ist im Ruhezustand also sehr gut ausgeglichen. Zusammen mit der sauberen
 Empfindlichkeit spricht das dafür, dass die Ring-Verschaltung der vier
 Halbbrücken korrekt ist - abgesehen eben von der vertauschten Signalpolarität.
-- **HX711-Pins am ESP:** `DOUT = D0` (GPIO16), `CLK = D1` (GPIO5)
-  - GPIO16 als DOUT geht, weil der HX711 die Leitung aktiv treibt (kein
-    Pull-up nötig) und der ESPHome-Treiber pollt statt Interrupts zu nutzen -
-    GPIO16 kann auf dem ESP8266 nämlich keine Interrupts.
-  - **Folge für später:** GPIO16 ist der Deep-Sleep-Weckpin. Solange DOUT dort
-    hängt, ist Batteriebetrieb per Deep Sleep ausgeschlossen.
+- **HX711-Pins am ESP:** `DOUT = D6` (GPIO12), `CLK = D1` (GPIO5)
+  - Ursprünglich lag DOUT auf `D0` (GPIO16). Das funktionierte elektrisch, weil
+    der HX711 die Leitung aktiv treibt (kein Pull-up nötig) und der
+    ESPHome-Treiber pollt statt Interrupts zu nutzen - GPIO16 kann auf dem
+    ESP8266 nämlich keine Interrupts.
+  - **Umgezogen auf GPIO12**, weil GPIO16 der einzige Weckpin aus dem Deep Sleep
+    ist und für den Solarbetrieb im Garten frei bleiben muss. GPIO12 ist kein
+    Boot-Strapping-Pin und sonst unbelegt. Die Kalibrierung bleibt davon
+    unberührt - der Rohwert hängt nicht am einlesenden GPIO.
+  - Vollständige Begründung, Verdrahtung und Strombilanz:
+    [`docs/deep-sleep-vorbereitung.md`](docs/deep-sleep-vorbereitung.md).
 - **Temperatursensor:** DS18B20 an `D5` (GPIO14), 1-Wire, externer Pull-up
   4,7 kΩ zwischen D5 und **3V3** (nicht 5 V - die ESP8266-GPIOs sind nicht
   5-V-tolerant). D4 wäre GPIO2 und damit ein Boot-Strapping-Pin, deshalb D5.
@@ -514,7 +519,12 @@ nur für eine belastbare Intraday-Kurve nicht.
    `api_encryption_key`, `ota_password`
 5. Optional/später denkbar (nur angesprochen, nicht umgesetzt):
    - Deep Sleep für Batteriebetrieb (Trade-off: Buttons dann nicht
-     jederzeit erreichbar - und die Sampling-Strategie müsste umgebaut werden)
+     jederzeit erreichbar - und die Sampling-Strategie müsste umgebaut werden).
+     **Der Pin-Blocker ist inzwischen beseitigt** (DOUT liegt auf GPIO12,
+     GPIO16 ist frei), der Rest ist ausgearbeitet in
+     [`docs/deep-sleep-vorbereitung.md`](docs/deep-sleep-vorbereitung.md).
+     Entscheidend ist dort nicht der ESP, sondern der Power-Down des HX711:
+     ohne ihn ziehen HX711 und Brücke ~5,8 mA weiter, auch im Schlaf.
    - Schwarm-Alarm-Automation in HA (plötzlicher Gewichtsverlust)
    - `state_class: measurement` für Langzeit-Statistiken in HA
    - Saisonale Messintervalle: die Voraussetzung dafür steht jetzt (die

@@ -18,7 +18,7 @@ ESP8266 (D1 Mini) mit HX711-Wägezellenverstärker und 4 Wägezellen.
 
 | Signal | Pin | GPIO |
 |---|---|---|
-| HX711 DOUT | `D0` | 16 |
+| HX711 DOUT | `D6` | 12 |
 | HX711 CLK | `D1` | 5 |
 | DS18B20 Data | `D5` | 14 |
 
@@ -27,11 +27,16 @@ parallel zur Datenleitung, nicht in Reihe. Unbedingt gegen **3,3 V**, nicht
 gegen 5 V: die GPIOs des ESP8266 sind nicht 5-V-tolerant. Viele fertige
 DS18B20-Module haben den Widerstand schon an Bord, dann keinen zweiten dazu.
 
-Zwei Pin-Eigenheiten, die man kennen sollte: **GPIO16 (D0)** kann auf dem
-ESP8266 keine Interrupts — für den HX711 egal, weil der ESPHome-Treiber pollt
-und der HX711 die Leitung aktiv treibt. GPIO16 ist aber der Deep-Sleep-Weckpin,
-Batteriebetrieb per Deep Sleep fällt damit weg. **D4 (GPIO2)** wurde für den
-DS18B20 bewusst gemieden, weil es ein Boot-Strapping-Pin ist.
+Zwei Pins sind bewusst freigehalten. **D0 (GPIO16)** ist der einzige Weg, auf
+dem der ESP8266 aus dem Deep Sleep aufwacht — der RTC-Timer zieht GPIO16 auf
+Masse, weshalb der Pin an `RST` liegen muss. Elektrisch hätte der HX711 dort
+funktioniert (der Treiber pollt, und DOUT wird aktiv getrieben, GPIO16 kann
+nämlich keine Interrupts), aber damit wäre Batteriebetrieb dauerhaft
+ausgeschlossen. Deshalb liegt DOUT auf `D6`. **D4 (GPIO2)** wurde für den
+DS18B20 gemieden, weil es ein Boot-Strapping-Pin ist.
+
+Details zur Verdrahtung und zum Rest der Deep-Sleep-Vorbereitung:
+[`docs/deep-sleep-vorbereitung.md`](docs/deep-sleep-vorbereitung.md).
 
 ## Was das Gerät kann
 

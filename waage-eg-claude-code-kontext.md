@@ -29,7 +29,7 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
 | Teil | Wert |
 |---|---|
 | Board | ESP8266, `d1_mini` |
-| HX711 | `dout_pin: D0` (GPIO16), `clk_pin: D1` (GPIO5), gain 128 |
+| HX711 | `dout_pin: D6` (GPIO12), `clk_pin: D1` (GPIO5), gain 128 |
 | Wägezellen | 4× 50 kg **YZC-161-Typ = Halbbrücken (3-adrig)**, im Ring zu **einer** Vollbrücke verschaltet |
 | DS18B20 (Temperatur) | Pin `D5` (GPIO14), externer Pull-up 4,7 kΩ gegen **3V3** |
 
@@ -69,9 +69,11 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
 - **`restore_from_flash: true` ist ZWINGEND.** Ohne diese Zeile landen alle
   `restore_value`-Globals nur im RTC-RAM → gehen bei jedem Stromausfall verloren,
   Kalibrierung fällt auf Platzhalter zurück. War Ursache eines realen Fehlerbilds.
-- **GPIO16 (D0) kann keine Interrupts** — für HX711 egal (Treiber pollt aktiv), aber
-  GPIO16 ist der Deep-Sleep-Weckpin → **Batteriebetrieb per Deep Sleep ist damit
-  ausgeschlossen**, solange DOUT auf D0 liegt.
+- **GPIO16 (D0) ist der einzige Deep-Sleep-Weckpin** des ESP8266 (RTC-Timer zieht
+  ihn auf Masse, muss deshalb an RST liegen). DOUT lag ursprünglich dort und hat
+  Batteriebetrieb blockiert; **inzwischen auf D6 (GPIO12) umgezogen**, GPIO16 ist
+  frei. GPIO16 kann außerdem keine Interrupts — für den HX711 war das egal, weil
+  der Treiber aktiv pollt.
 - **D4 (GPIO2) gemieden** — Boot-Strapping-Pin.
 
 ### Auflösung
@@ -197,9 +199,16 @@ Gegenprobe mit Ohmmeter: E+/E− und A+/A− müssen etwa gleich sein (~1 kΩ).
   - Breit streuende Punktwolke → Eckengradienten dominieren, ein einzelner Sensor kann
     das nicht korrigieren → dann auf Tagesbilanz verlassen.
 
-**Vertagt:**
-- Deep Sleep / Batteriebetrieb — blockiert, solange DOUT auf D0 (GPIO16, Weckpin) liegt.
-  Erfordert Umverdrahtung und neue Sampling-Strategie.
+**Deep Sleep / Batteriebetrieb (Zielaufbau: Garten, Solar, NiMH 2600 mAh):**
+- Der Pin-Blocker ist beseitigt: DOUT liegt jetzt auf D6 (GPIO12), GPIO16 bleibt
+  für den Weckpfad frei. **Gilt erst nach dem Umstecken der Verdrahtung** — YAML
+  und Hardware gehören zusammen geflasht.
+- Noch offen: `D0`↔`RST` überbrücken (470 Ω), Pull-up 10 kΩ auf SCK, Power-Down
+  des HX711 (der Treiber kann das nicht von sich aus), kürzere Filterkette,
+  Wachhalten-Schalter für OTA. Alles ausgearbeitet und mit `esphome config`
+  geprüft in [`docs/deep-sleep-vorbereitung.md`](docs/deep-sleep-vorbereitung.md).
+- Der entscheidende Posten ist nicht der ESP: HX711 und Wägezellenbrücke ziehen
+  ~5,8 mA dauerhaft, der schlafende ESP nur ~0,02 mA.
 
 **Erwägenswert (nicht entschieden):**
 - Junction-Box mit Trimmpotis für Eckenabgleich (größter Einzelfehler).
@@ -228,7 +237,7 @@ secrets.yaml-Frage klären"].
 
 Bitte halte dich an die dort dokumentierten Konventionen (deutsche Sprache in Code/
 Doku, keine calibrate_linear-Kalibrierung, restore_from_flash: true nicht entfernen,
-kein Deep Sleep wegen GPIO16).
+GPIO16/D0 bleibt für den Deep-Sleep-Weckpfad frei).
 ```
 
 Trag im Platzhalter einfach ein, womit du als Nächstes weitermachen willst.
