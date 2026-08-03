@@ -82,6 +82,15 @@ Halbbrücken korrekt ist - abgesehen eben von der vertauschten Signalpolarität.
     unberührt - der Rohwert hängt nicht am einlesenden GPIO.
   - Vollständige Begründung, Verdrahtung und Strombilanz:
     [`docs/deep-sleep-vorbereitung.md`](docs/deep-sleep-vorbereitung.md).
+- **Durchsicht-Taster:** Momenttaster an `D2` (GPIO4) gegen GND, interner
+  Pull-up (`inverted: true`), entprellt mit `delayed_on/off: 50ms`.
+- **Durchsicht-LED:** an `D7` (GPIO13) gegen GND, Vorwiderstand 1 kΩ (~1,3 mA).
+  GPIO13 ist kein Boot-Strapping-Pin.
+  - **Damit ist der D1 Mini praktisch voll.** Belegt sind GPIO4, 5, 12, 13, 14;
+    GPIO16 ist fuer den Deep-Sleep-Weckpfad reserviert, GPIO15 als
+    Boot-Strapping-Pin mit Pulldown ungeeignet fuer einen Taster. Frei bleibt
+    nur `D4`/GPIO2 - reserviert fuer den MOSFET, der den HX711 stromlos
+    schalten soll.
 - **Temperatursensor:** DS18B20 an `D5` (GPIO14), 1-Wire, externer Pull-up
   4,7 kΩ zwischen D5 und **3V3** (nicht 5 V - die ESP8266-GPIOs sind nicht
   5-V-tolerant). D4 wäre GPIO2 und damit ein Boot-Strapping-Pin, deshalb D5.
@@ -410,6 +419,78 @@ Intervall kostet keine Genauigkeit, ein langes verschlechtert sie nicht.
   vergessen aufzulegen). Sonst wäre `span == 0` und die Waage tot.
 - **Logging:** Alle drei Buttons loggen, was sie gespeichert haben - macht die
   reale Kalibrierung nachvollziehbar.
+
+## Durchsichtmodus (Hardware-Taster + LED)
+
+Bei einer Durchsicht wiegt die Waage Zargen, Haende und Stockmeissel. Diese
+Werte duerfen nicht nach HA: sie haben `state_class: measurement` und landen
+damit dauerhaft in der Langzeitstatistik.
+
+**Gesperrt wird die Veroeffentlichung, nicht die Messung.** Der HX711 laeuft mit
+seinem 1s-Takt und der kompletten Filterkette weiter. Damit ist die Kette am
+Ende der Durchsicht eingeschwungen und liefert sofort einen brauchbaren Wert -
+haette man den Sensor angehalten, muesste er erst wieder 60 s einschwingen.
+Gesperrt sind Gewicht **und** alle Diagnose-Entities; der Rohwert waehrend einer
+Manipulation ist genauso wertlos wie das Gewicht und wuerde die Driftanalyse
+verderben.
+
+### Entscheidungen
+
+- **Umschalten statt getrennter Ein/Aus-Taste.** Ein Taster, ein Druck: aus →
+  an, an → aus. Mit Handschuhen am Stock ist alles andere fehleranfaellig, und
+  die LED gibt sofort Rueckmeldung, was passiert ist. Ein Druck waehrend der
+  Durchsicht startet die Zeit neu, verlaengert also.
+- **`durchsicht_restminuten` ist NICHT `restore_value`.** Ein Neustart beendet
+  den Modus. Eine Waage, die nach einem Stromausfall still im Durchsichtmodus
+  haengt und wochenlang nichts sendet, ist schlimmer als einmal zu viel
+  druecken.
+- **Zwei Minuten Nachlauf nach dem Ende.** Das 60-s-Mittelungsfenster enthaelt
+  direkt nach dem Zumachen noch die Manipulation. Erst ausspuelen lassen, dann
+  senden - und dann sofort, nicht erst nach einem vollen Messintervall, damit
+  in HA sichtbar wird, dass die Waage wieder arbeitet.
+- **Start und Ende liegen in `script`s.** Beides wird von zwei Seiten
+  ausgeloest, vom Taster und vom HA-Schalter. Doppelte Logik waere die
+  klassische Quelle fuer "am Taster geht es, in HA nicht".
+- **Der Schalter ist `optimistic: false`.** Der Zustand kommt aus den Skripten,
+  nicht aus dem Schaltbefehl - sonst zeigt HA "an", waehrend die Zeit laengst
+  abgelaufen ist.
+- **LED blinkt in den letzten 5 Minuten** (eigener `interval: 500ms`, der
+  Minutentakt waere dafuer zu grob). Man merkt am Stock, dass es knapp wird,
+  bevor die Waage von selbst wieder sendet.
+- **Dauer als Number-Entity** (5-240 min, Voreinstellung 60), passend zu
+  `Messintervall` und `Referenzgewicht`.
+
+### HA-Seite: der Schwarm-Alarm braucht eine Sperre
+
+Nach der Durchsicht springt das Gewicht in **einem** Schritt auf den neuen
+Wert. Der 20-min-Ableitungshelfer `sensor.waage_eg_waage_gewichtsverlust_kurz`
+sieht darin einen rasanten Verlust - nach dem Abnehmen einer Honigzarge loest
+`Bienen: Schwarm-Alarm` damit zuverlaessig faelschlich aus.
+
+Die Automation braucht eine Bedingung, die **laenger** sperrt als das
+Ableitungsfenster:
+
+```yaml
+condition:
+  - condition: state
+    entity_id: switch.waage_eg_durchsichtmodus
+    state: "off"
+    for: "00:30:00"
+```
+
+Sinngemaess dasselbe fuer `Bienen: Futtervorrat kritisch`. **Noch nicht
+eingebaut** - steht in den offenen Punkten.
+
+### Validierung
+
+`esphome config` gegen ESPHome 2026.6.5: *Configuration is valid*, fuenf
+verschiedene GPIOs (4, 5, 12, 13, 14), keine Doppelbelegung. Die Zustandslogik
+(Taktgeber, Nachlauf, LED) wurde wie schon bei den Kalibrier-Lambdas als
+eigenstaendiges C++17-Programm mit `g++ -Wall -Wextra` nachgebaut und
+minutenweise durchsimuliert: 19 Pruefungen ohne Fehler - keine Veroeffentlichung
+waehrend der Durchsicht, erster Wert exakt nach Dauer + 2 min, vorzeitiges
+Beenden, Verlaengern, Blinkgrenze bei 5 Restminuten, Verhalten bei 15-min- und
+60-min-Messintervall, Neustart mitten in der Durchsicht.
 
 ## Temperatur: erst messen, dann entscheiden
 

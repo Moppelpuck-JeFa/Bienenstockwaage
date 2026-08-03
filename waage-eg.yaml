@@ -82,6 +82,22 @@ globals:
     type: uint32_t
     restore_value: no
     initial_value: '0'
+  # Restlaufzeit des Durchsichtmodus in Minuten (0 = aus).
+  # Bewusst NICHT restore_value: nach einem Neustart soll die Waage wieder
+  # normal senden. Ein haengender Durchsichtmodus, den niemand bemerkt, waere
+  # schlimmer als ein verlorener - im Zweifel lieber einmal zu viel druecken.
+  - id: durchsicht_restminuten
+    type: int
+    restore_value: no
+    initial_value: '0'
+  # Nachlauf nach dem Ende der Durchsicht, in Minuten.
+  # Die Filterkette mittelt ueber ~60 s. Direkt nach dem Zumachen steckt die
+  # Manipulation noch im Fenster - dieser Wert laesst sie erst ausspuelen,
+  # bevor der erste Messwert wieder nach HA geht.
+  - id: nachlauf_minuten
+    type: int
+    restore_value: no
+    initial_value: '0'
 
 # --- 1-Wire-Bus für den Temperatursensor ---
 # DS18B20 an D5 (GPIO14). D1/D2 sind vom HX711 belegt, D4 wäre GPIO2 und
@@ -282,6 +298,37 @@ binary_sensor:
     name: "Verbindung"
     entity_category: diagnostic
 
+  # --- Hardware-Taster fuer den Durchsichtmodus ---
+  # Taster gegen GND an D2 (GPIO4), interner Pull-up, deshalb "inverted".
+  # GPIO4 ist kein Boot-Strapping-Pin und sonst unbelegt.
+  # Ein Druck schaltet um: aus -> an fuer die eingestellte Dauer, an -> sofort
+  # aus. Das ist mit Handschuhen am Stock die einfachste Bedienung, und die LED
+  # sagt sofort, was passiert ist.
+  # Nur intern: der Tastenzustand selbst gehoert nicht nach HA, der Modus schon
+  # (siehe switch "Durchsichtmodus").
+  - platform: gpio
+    id: durchsicht_taster
+    internal: true
+    pin:
+      number: D2
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    filters:
+      # Entprellen. Ohne das loest ein einziger Druck mehrfach aus und der
+      # Modus schaltet sich sofort wieder ab.
+      - delayed_on: 50ms
+      - delayed_off: 50ms
+    on_press:
+      - if:
+          condition:
+            lambda: 'return id(durchsicht_restminuten) > 0;'
+          then:
+            - script.execute: durchsicht_beenden
+          else:
+            - script.execute: durchsicht_starten
+
 # --- Virtueller Tara-Button + Kalibrier-Buttons ---
 # Die Kalibrier- und Tara-Buttons lesen direkt den gefilterten Zustand von
 # hx711_raw_counts. Der ist dank 1s-Abfrage immer aktuell (max. 5s alt),
@@ -464,6 +511,89 @@ number:
           id(waage_uptime).update();
           ESP_LOGI("waage", "Messintervall auf %.0f min gesetzt", x);
 
+  # Wie lange der Durchsichtmodus laeuft, bis er sich selbst beendet.
+  # Eine Durchsicht dauert selten laenger als eine Stunde; wer mehr braucht,
+  # drueckt am Stock einfach nochmal (jeder Druck startet die Zeit neu).
+  - platform: template
+    id: durchsicht_dauer
+    name: "Durchsichtdauer"
+    icon: "mdi:timer-outline"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: 60
+    min_value: 5
+    max_value: 240
+    step: 5
+    unit_of_measurement: "min"
+    mode: box
+
+# --- Kontroll-LED für den Durchsichtmodus ---
+# LED an D7 (GPIO13) gegen GND, in Reihe ein Vorwiderstand von 1 kΩ
+# (ergibt ~1,3 mA - für eine moderne LED gut sichtbar und sparsam genug,
+# dass sie im spaeteren Solarbetrieb nicht ins Gewicht faellt).
+# GPIO13 ist kein Boot-Strapping-Pin. Bewusst NICHT D4/GPIO2: der bleibt als
+# letzter freier Pin fuer den geplanten MOSFET reserviert, der den HX711
+# stromlos schaltet (siehe docs/deep-sleep-vorbereitung.md).
+output:
+  - platform: gpio
+    id: durchsicht_led
+    pin: D7
+
+# --- Durchsichtmodus ---
+# Waehrend einer Durchsicht misst die Waage alles Moegliche - Zargen, die
+# abgestellt werden, die Hand am Rahmen, den Stockmeissel - nur nicht das
+# Stockgewicht. Diese Werte duerfen nicht nach HA, sonst stehen sie fuer immer
+# in der Statistik und reissen Tagesbilanz und Trend auseinander.
+#
+# Der HX711 laeuft dabei bewusst weiter: die Filterkette bleibt warm, und nach
+# dem Ende steht sofort wieder ein eingeschwungener Wert bereit.
+switch:
+  - platform: template
+    id: durchsichtmodus
+    name: "Durchsichtmodus"
+    icon: "mdi:hand-back-right-outline"
+    # Nach einem Neustart immer aus - passend zum nicht gesicherten Global.
+    restore_mode: ALWAYS_OFF
+    # Kein optimistic: der Zustand kommt aus den Skripten, nicht aus dem
+    # Schaltbefehl. Sonst wuerde HA "an" anzeigen, waehrend die Zeit laengst
+    # abgelaufen ist.
+    optimistic: false
+    turn_on_action:
+      - script.execute: durchsicht_starten
+    turn_off_action:
+      - script.execute: durchsicht_beenden
+
+# Start und Ende liegen in Skripten, weil beides von zwei Seiten ausgeloest
+# wird: vom Taster am Stock und vom Schalter in HA. Doppelte Logik waere hier
+# die klassische Quelle fuer "am Taster geht es, in HA nicht".
+script:
+  - id: durchsicht_starten
+    mode: restart
+    then:
+      - lambda: |-
+          int dauer = (int) id(durchsicht_dauer).state;
+          // Absicherung, falls die Number noch keinen Wert hat
+          if (dauer < 1) {
+            dauer = 60;
+          }
+          id(durchsicht_restminuten) = dauer;
+          id(nachlauf_minuten) = 0;
+          id(durchsichtmodus).publish_state(true);
+          id(durchsicht_led).turn_on();
+          ESP_LOGI("waage", "Durchsichtmodus an: %d min keine Uebertragung", dauer);
+
+  - id: durchsicht_beenden
+    mode: restart
+    then:
+      - lambda: |-
+          id(durchsicht_restminuten) = 0;
+          // Nachlauf, damit der erste Wert nach der Durchsicht sauber ist
+          id(nachlauf_minuten) = 2;
+          id(durchsichtmodus).publish_state(false);
+          id(durchsicht_led).turn_off();
+          ESP_LOGI("waage", "Durchsichtmodus aus - 2 min Nachlauf, dann Messung");
+
 # --- Taktgeber für die Veröffentlichung an Home Assistant ---
 # Läuft jede Minute und zählt hoch. Ist das eingestellte Intervall erreicht,
 # werden Gewicht und Betriebszeit veröffentlicht und der Zähler beginnt neu.
@@ -471,6 +601,42 @@ interval:
   - interval: 60s
     then:
       - lambda: |-
+          // --- Durchsichtmodus: nichts nach HA schicken ---
+          // Laeuft die Durchsicht, wird nur heruntergezaehlt und sonst nichts.
+          // Auch die Diagnose-Entities bleiben stehen: der Rohwert waehrend
+          // einer Manipulation ist keine Messung, und er hat state_class
+          // measurement - er landet also dauerhaft in der Langzeitstatistik.
+          if (id(durchsicht_restminuten) > 0) {
+            id(durchsicht_restminuten)--;
+            if (id(durchsicht_restminuten) == 0) {
+              // Zeit abgelaufen: dasselbe Skript wie beim Druck auf den Taster,
+              // damit Schalter, LED und Nachlauf in jedem Fall gleich enden
+              id(durchsicht_beenden).execute();
+            }
+            return;
+          }
+
+          // --- Nachlauf nach der Durchsicht ---
+          // Das 60-s-Mittelungsfenster enthaelt direkt nach dem Zumachen noch
+          // die Manipulation. Erst ausspuelen lassen, dann den ersten Wert
+          // senden - und zwar sofort, nicht erst nach einem vollen Intervall,
+          // damit man in HA sieht, dass die Waage wieder normal arbeitet.
+          if (id(nachlauf_minuten) > 0) {
+            id(nachlauf_minuten)--;
+            if (id(nachlauf_minuten) > 0) {
+              return;
+            }
+            ESP_LOGI("waage", "Nachlauf beendet - erster Wert nach der Durchsicht");
+            id(minuten_seit_messung) = 0;
+            id(waage_gewicht).update();
+            id(waage_uptime).update();
+            id(rohwert).update();
+            id(kalibrierfaktor).update();
+            id(kalibriert_mit).update();
+            id(kalibriert_bei).update();
+            return;
+          }
+
           float soll_f = id(mess_intervall).state;
           // Absicherung, falls die Number noch keinen Wert hat
           if (std::isnan(soll_f) || soll_f < 1.0f) {
@@ -495,6 +661,31 @@ interval:
             id(kalibrierfaktor).update();
             id(kalibriert_mit).update();
             id(kalibriert_bei).update();
+          }
+
+  # Signalisierung des Durchsichtmodus.
+  # Dauerlicht, solange reichlich Zeit ist; in den letzten 5 Minuten blinkend,
+  # damit man am Stock merkt, dass es knapp wird, bevor die Waage von selbst
+  # wieder sendet. Der eigene 500-ms-Takt ist noetig, weil der Minutentakt
+  # oben zum Blinken zu grob ist.
+  - interval: 500ms
+    then:
+      - lambda: |-
+          static bool blinkphase = false;
+          int rest = id(durchsicht_restminuten);
+          if (rest <= 0) {
+            id(durchsicht_led).turn_off();
+            blinkphase = false;
+          } else if (rest > 5) {
+            id(durchsicht_led).turn_on();
+            blinkphase = true;
+          } else {
+            blinkphase = !blinkphase;
+            if (blinkphase) {
+              id(durchsicht_led).turn_on();
+            } else {
+              id(durchsicht_led).turn_off();
+            }
           }
 
 # Optional: Web-Server für schnellen Zugriff im Browser ohne Home Assistant

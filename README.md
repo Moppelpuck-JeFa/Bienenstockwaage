@@ -21,6 +21,13 @@ ESP8266 (D1 Mini) mit HX711-Wägezellenverstärker und 4 Wägezellen.
 | HX711 DOUT | `D6` | 12 |
 | HX711 CLK | `D1` | 5 |
 | DS18B20 Data | `D5` | 14 |
+| Durchsicht-Taster | `D2` | 4 |
+| Durchsicht-LED | `D7` | 13 |
+
+Der **Taster** liegt gegen GND und nutzt den internen Pull-up — kein externer
+Widerstand nötig. Die **LED** hängt über einen Vorwiderstand von **1 kΩ**
+gegen GND (~1,3 mA; hell genug und sparsam genug für den späteren
+Solarbetrieb).
 
 Der DS18B20 braucht einen **externen Pull-up 4,7 kΩ zwischen D5 und 3V3** —
 parallel zur Datenleitung, nicht in Reihe. Unbedingt gegen **3,3 V**, nicht
@@ -165,6 +172,59 @@ also nie sinnvoll reagieren, egal welches Intervall eingestellt ist.
 Nach einem Neustart kommt der erste Wert bereits nach ~1 Minute, unabhängig vom
 eingestellten Intervall - du musst also nicht bis zum Ablauf einer vollen
 Periode warten, um zu sehen, ob das Gerät läuft.
+
+## Durchsichtmodus
+
+Während einer Durchsicht misst die Waage alles Mögliche — die abgestellte
+Zarge, die Hand am Rahmen, den Stockmeißel — nur nicht das Stockgewicht. Diese
+Werte dürfen nicht nach Home Assistant, sonst stehen sie für immer in der
+Langzeitstatistik und reißen Tagesbilanz und Trend auseinander.
+
+**Ein Druck auf den Taster am Gehäuse** schaltet die Übertragung ab, die LED
+leuchtet. Nach der eingestellten Zeit (Voreinstellung 60 min) endet der Modus
+von selbst.
+
+| Bedienung | Wirkung |
+|---|---|
+| Taster drücken, LED aus → an | Durchsicht startet, keine Übertragung mehr |
+| Taster nochmal drücken, LED an → aus | Durchsicht sofort beenden |
+| Taster während der Durchsicht | jeder Druck startet die Zeit neu (verlängern) |
+| LED blinkt | weniger als 5 Minuten übrig |
+
+Dasselbe geht über die Entity **„Waage eG Durchsichtmodus"** in HA — praktisch,
+wenn man am Stock das Drücken vergessen hat. Die Dauer stellt
+**„Waage eG Durchsichtdauer"** ein (5 bis 240 Minuten).
+
+**Was dabei genau passiert:** Der HX711 misst und filtert unverändert weiter,
+nur die Veröffentlichung nach HA unterbleibt — Gewicht wie Diagnosewerte. In HA
+bleibt der letzte Wert von vor der Durchsicht stehen. Nach dem Ende laufen
+**zwei Minuten Nachlauf**, damit das 60-Sekunden-Mittelungsfenster die
+Manipulation ausspült; danach kommt sofort ein frischer Wert, unabhängig vom
+eingestellten Messintervall.
+
+Ein Neustart beendet den Modus. Das ist Absicht: eine Waage, die nach einem
+Stromausfall still im Durchsichtmodus hängt und wochenlang nichts mehr sendet,
+wäre schlimmer als einmal zu viel drücken.
+
+### Wichtig: der Schwarm-Alarm braucht eine Sperre
+
+Nach der Durchsicht springt das Gewicht in einem Schritt auf den neuen Wert.
+Der Helfer für die Schwarm-Erkennung (Ableitung über 20 min in kg/h) sieht
+diesen Sprung als rasanten Gewichtsverlust — hast du eine Honigzarge
+abgenommen, **löst der Schwarm-Alarm zuverlässig fälschlich aus**.
+
+Die Automation `Bienen: Schwarm-Alarm` braucht deshalb eine zusätzliche
+Bedingung. Die Sperre muss länger sein als das Ableitungsfenster von 20 min:
+
+```yaml
+condition:
+  - condition: state
+    entity_id: switch.waage_eg_durchsichtmodus
+    state: "off"
+    for: "00:30:00"
+```
+
+Dasselbe gilt sinngemäß für `Bienen: Futtervorrat kritisch`.
 
 ## Temperatur: aufgezeichnet, nicht verrechnet
 

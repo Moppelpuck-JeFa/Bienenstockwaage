@@ -238,6 +238,31 @@ der `wachhalten`-Schalter oben da — und er ist zugleich die einzige Möglichke
 noch ein OTA-Update einzuspielen. Ohne ihn ist das Gerät nach dem ersten Flash
 mit aktivem Deep Sleep praktisch nur noch über USB erreichbar.
 
+**Der Durchsicht-Taster funktioniert so nicht mehr.** Der ESP8266 kann aus dem
+Deep Sleep **nur** über den RTC-Timer aufwachen, nicht über einen GPIO. Ein
+Momenttaster, der während der Schlafphase gedrückt wird, ist danach spurlos
+weg — und genau dann steht man am Stock. Auch die LED erlischt, weil die GPIOs
+im Schlaf nicht mehr getrieben werden.
+
+Zwei Wege:
+
+- **Rastenden Schalter statt Momenttaster** (Kipp- oder Schiebeschalter). Der
+  hält seinen Zustand über die Schlafphase; das Gerät liest ihn bei jedem
+  Aufwachen und überspringt die Veröffentlichung, solange er an ist. Die
+  LED-Anzeige lässt sich dann **direkt über den Schalter** verdrahten, ohne
+  GPIO — dann leuchtet sie auch im Schlaf, was der eigentliche Zweck ist. Der
+  Preis: das Blinken in den letzten Minuten entfällt, und die Zeitbegrenzung
+  auch (der Schalter bleibt an, bis man ihn umlegt).
+- **Taster zusätzlich auf `RST`** legen, damit ein Druck das Gerät weckt. Dann
+  weiß das Gerät nach dem Neustart aber nicht, *warum* es wach ist, und
+  `durchsicht_restminuten` ist als nicht gesichertes Global ohnehin weg.
+  Funktioniert nur mit `restore_value: yes` und einer Auswertung des
+  Reset-Grunds — deutlich mehr Aufwand für wenig Gewinn.
+
+**Empfehlung:** Beim Umstieg auf Deep Sleep den Momenttaster gegen einen
+rastenden Schalter tauschen und die LED an den Schalter hängen. Bis dahin — im
+Netzbetrieb — ist die jetzige Lösung die komfortablere.
+
 **Kleinkram:** `web_server` sollte raus (RAM und Strom). `wifi` sollte
 `fast_connect: true` und eine feste `manual_ip` bekommen — der WLAN-Scan ist
 sonst der größte Einzelposten im Weckfenster. Die `uptime`-Entity verliert ihren

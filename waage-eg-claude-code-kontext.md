@@ -32,6 +32,8 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
 | HX711 | `dout_pin: D6` (GPIO12), `clk_pin: D1` (GPIO5), gain 128 |
 | Wägezellen | 4× 50 kg **YZC-161-Typ = Halbbrücken (3-adrig)**, im Ring zu **einer** Vollbrücke verschaltet |
 | DS18B20 (Temperatur) | Pin `D5` (GPIO14), externer Pull-up 4,7 kΩ gegen **3V3** |
+| Durchsicht-Taster | `D2` (GPIO4) gegen GND, interner Pull-up |
+| Durchsicht-LED | `D7` (GPIO13) gegen GND, 1 kΩ Vorwiderstand |
 
 **Gemessene Istwerte:**
 - Kalibrierfaktor: **−20.840 counts/kg** (negativ = invertierte Signalpolarität, funktional unkritisch)
@@ -88,6 +90,21 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   geratener Koeffizient würde die Messung unbemerkt verschlechtern.
 - `calib_temp` wird bei Nullpunkt-Kalibrierung mitgespeichert (nicht nachträglich
   rekonstruierbar).
+
+### Durchsichtmodus
+- Hardware-Taster am Stock sperrt die **Veroeffentlichung** (nicht die Messung)
+  fuer eine einstellbare Zeit, Voreinstellung 60 min. LED zeigt den Zustand,
+  blinkt in den letzten 5 Minuten. Zusaetzlich als Schalter in HA.
+- Der HX711 laeuft bewusst weiter, damit die Filterkette eingeschwungen bleibt.
+- `durchsicht_restminuten` ist **nicht** `restore_value`: ein Neustart beendet
+  den Modus. Ein unbemerkt haengender Durchsichtmodus waere schlimmer.
+- **2 min Nachlauf** nach dem Ende, damit das 60-s-Mittelungsfenster die
+  Manipulation ausspuelt, danach sofort ein Wert (nicht erst nach dem Intervall).
+- **Offener Punkt auf der HA-Seite:** Nach der Durchsicht springt das Gewicht in
+  einem Schritt. Der 20-min-Ableitungshelfer liest das als Absturz →
+  `Bienen: Schwarm-Alarm` loest faelschlich aus. Die Automation braucht
+  `switch.waage_eg_durchsichtmodus` == off `for: 00:30:00` als Bedingung
+  (laenger als das Ableitungsfenster). Noch nicht eingebaut.
 
 ### Namensgebung
 - Entity-Namen **ohne** `"Waage eG "`-Präfix im YAML, weil ESPHome den `friendly_name`
@@ -185,6 +202,9 @@ Gegenprobe mit Ohmmeter: E+/E− und A+/A− müssen etwa gleich sein (~1 kΩ).
 ## 7. Offene Punkte / nächste Schritte
 
 **Sofort anzupassen (Platzhalter):**
+- **Schwarm-Alarm gegen den Durchsichtmodus sperren** — sonst loest er nach
+  jeder Durchsicht aus, bei der Gewicht abgenommen wurde. Bedingung siehe
+  Abschnitt "Durchsichtmodus".
 - `input_number.leergewicht_beute` und `input_number.mindestgewicht_mit_futter` stehen
   beide noch auf 0,0 kg. Reale Werte eintragen (Beute leer wiegen; Mindestgewicht =
   Beute + Bienen + Mindestfutterreserve). Bis dahin liefert `binary_sensor.futtervorrat_kritisch`
