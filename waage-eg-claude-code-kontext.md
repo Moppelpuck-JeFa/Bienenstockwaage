@@ -154,6 +154,22 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   Config-Replace verwenden.
 - `hx711.tare` existiert **nicht** als ESPHome-Action — Tara wird über einen
   globals-basierten Lambda-Workaround gelöst.
+- **ESPHome-Packages (seit 04.08.):** Das Device Builder Add-on listet nur
+  YAML-Dateien direkt in `/config/esphome/` als Geräte — Stock-Dateien gehören
+  deshalb in den Root, die Basis nach `packages/`. `!secret` in einem Package
+  löst gegen das Verzeichnis der geflashten Stock-Datei auf, `secrets.yaml`
+  bleibt also im Root; `esphome config packages/waage-basis.yaml` direkt
+  aufzurufen schlägt deshalb fehl (erwartet). Werte aus der Stock-Datei haben
+  Vorrang vor denen aus dem Package — so bekommt ein einzelner Stock bei Bedarf
+  einen eigenen API-Key. Substitutions lassen sich **nicht** in `!secret`
+  hineinschreiben.
+- **ESPHome lokal zum Prüfen installieren** (`pip install esphome`):
+  `esphome config <datei>.yaml` löst Packages, Substitutions und Secrets
+  vollständig auf, ohne Hardware und ohne Compiler-Lauf. Damit lässt sich eine
+  Änderung an der Basis vor dem Flashen gegen jeden Stock absichern —
+  `esphome config` vorher/nachher in Dateien schreiben und `diff`en. Genau so
+  wurde die Package-Umstellung als verhaltensgleich nachgewiesen. Secret-Werte
+  sind in der Ausgabe ANSI-maskiert, bei Bedarf `--show-secrets`.
 - ESPHome Device Builder Add-on (Slug `5c53de3b_esphome`, Port `6052`) braucht für
   Dashboard-API-Zugriff zwei nicht offensichtliche Einstellungen: Port `6052/tcp` auf
   Host-Port `6052` gemappt, und `leave_front_door_open: true` — ohne beides: HTTP 403.
@@ -233,6 +249,21 @@ Gegenprobe mit Ohmmeter: E+/E− und A+/A− müssen etwa gleich sein (~1 kΩ).
 ---
 
 ## 7. Offene Punkte / nächste Schritte
+
+**Mehrere Stöcke (Stand 04.08.):**
+- YAML-Basis steht: `packages/waage-basis.yaml` plus eine Stock-Datei je Gerät,
+  `waage-stock2` und `waage-stock3` sind angelegt und validiert. Hardware für
+  die neuen Stöcke ist noch nicht aufgebaut.
+- **Namen vor dem ersten Flash festlegen.** Empfehlung: Standort statt
+  Durchnummerierung (`waage-garten` statt `waage-stock2`), weil
+  `geraete_name`+`anzeige_name` die entity_id bilden und ein späteres
+  Umbenennen die HA-Historie kostet. Solange nicht geflasht wurde, sind es
+  drei Zeilen.
+- **HA-Seite für die neuen Stöcke fehlt komplett** — Helfer, Automationen,
+  Dashboard. Bewusst als eigener Schritt vertagt. Die bestehenden hängen an
+  `waage-eg`-Entities und müssen pro Stock dupliziert oder auf eine
+  Blueprint-/Template-Lösung umgestellt werden.
+- Details: [`docs/sessionbericht-2026-08-04.md`](docs/sessionbericht-2026-08-04.md)
 
 **Sofort anzupassen (Platzhalter):**
 - **NEU KALIBRIEREN, beide Schritte.** Beim Flash am 03.08. ging die

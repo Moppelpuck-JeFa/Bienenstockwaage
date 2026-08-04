@@ -19,6 +19,7 @@ weitere Stöcke ohne Code-Duplizierung dazukommen (siehe
 | [`docs/waegezellen-verkabelung.md`](docs/waegezellen-verkabelung.md) | Verkabelung der 4 Zellen, Junction-Box, Kaufkriterien |
 | [`docs/deep-sleep-vorbereitung.md`](docs/deep-sleep-vorbereitung.md) | Was Batterie-/Solarbetrieb braucht: Verdrahtung, Strombilanz, YAML |
 | [`docs/sessionbericht-2026-08-03.md`](docs/sessionbericht-2026-08-03.md) | Temperaturdrift ausgewertet, Durchsichtmodus, Kalibrierungsverlust |
+| [`docs/sessionbericht-2026-08-04.md`](docs/sessionbericht-2026-08-04.md) | Umstellung auf substitutions/packages, Namensschema, ESPHome-Fallstricke |
 
 `secrets.yaml` selbst ist per `.gitignore` ausgeschlossen und gehört nicht ins Repo.
 
