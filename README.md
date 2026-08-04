@@ -1,13 +1,19 @@
 # waage
 
-ESPHome-Konfiguration für die Bienenstockwaage **"Waage eG"** -
+ESPHome-Konfiguration für Bienenstockwaagen -
 ESP8266 (D1 Mini) mit HX711-Wägezellenverstärker und 4 Wägezellen.
+Produktiv läuft **"Waage eG"**; die Konfiguration ist so aufgeteilt, dass
+weitere Stöcke ohne Code-Duplizierung dazukommen (siehe
+[Mehrere Stöcke](#mehrere-stöcke)).
 
 ## Dateien
 
 | Datei | Inhalt |
 |-------|--------|
-| [`waage-eg.yaml`](waage-eg.yaml) | Die ESPHome-Konfiguration - der eigentliche Code |
+| [`packages/waage-basis.yaml`](packages/waage-basis.yaml) | Die gesamte gemeinsame Logik - der eigentliche Code. Wird nicht direkt geflasht |
+| [`waage-eg.yaml`](waage-eg.yaml) | Stock 1 "Waage eG": nur substitutions + package-Include |
+| [`waage-stock2.yaml`](waage-stock2.yaml) | Stock 2, gleiche Bauart |
+| [`waage-stock3.yaml`](waage-stock3.yaml) | Stock 3, gleiche Bauart |
 | [`secrets.yaml.example`](secrets.yaml.example) | Vorlage für die Zugangsdaten (kopieren nach `secrets.yaml`) |
 | [`waage-eg-notes.md`](waage-eg-notes.md) | Projektnotizen: alle Entscheidungen, Anforderungen, offene Punkte |
 | [`docs/waegezellen-verkabelung.md`](docs/waegezellen-verkabelung.md) | Verkabelung der 4 Zellen, Junction-Box, Kaufkriterien |
@@ -67,8 +73,72 @@ Details zur Verdrahtung und zum Rest der Deep-Sleep-Vorbereitung:
 
 1. `secrets.yaml.example` nach `secrets.yaml` kopieren und ausfüllen
    (im ESPHome Device Builder liegt sie unter `/config/esphome/secrets.yaml`)
-2. `waage-eg.yaml` ins ESPHome-Verzeichnis legen, kompilieren und flashen
+2. `waage-eg.yaml` **und den Ordner `packages/`** ins ESPHome-Verzeichnis
+   legen, kompilieren und flashen. Ohne `packages/` bricht das Kompilieren
+   mit einem Fehler zum fehlenden Include ab - die Stock-Datei allein
+   enthält keine Logik mehr.
 3. Gerät in Home Assistant hinzufügen (der API-Key aus `secrets.yaml`)
+
+## Mehrere Stöcke
+
+Die Konfiguration ist in **eine Basis + eine Datei pro Stock** aufgeteilt:
+
+```
+packages/waage-basis.yaml    komplette Logik, für alle Stöcke identisch
+waage-eg.yaml                Stock 1 - nur substitutions + package-Include
+waage-stock2.yaml            Stock 2
+waage-stock3.yaml            Stock 3
+```
+
+Die Stock-Dateien liegen bewusst **im Root**, nicht in einem
+Unterverzeichnis: Das ESPHome Device Builder Add-on listet nur die YAML-
+Dateien direkt in `/config/esphome/` als flashbare Geräte auf.
+Unterverzeichnisse liest es ausschließlich über `packages:` / `!include` —
+genau deshalb taucht `packages/waage-basis.yaml` dort nicht als
+Pseudo-Gerät auf.
+
+### Einen weiteren Stock anlegen
+
+1. Eine der vorhandenen Stock-Dateien kopieren
+2. `geraete_name`, `anzeige_name` und `ap_ssid` anpassen
+3. Pins nur anfassen, wenn wirklich anders verdrahtet wurde
+4. Flashen, in HA hinzufügen, **beide Kalibrierschritte** fahren
+
+Alles andere — Filterkette, Kalibrier-Buttons, Durchsichtmodus, Taktgeber —
+kommt aus der Basis und wird nie kopiert. Eine Verbesserung dort wirkt
+nach dem nächsten Flash auf allen Stöcken.
+
+### Namensschema
+
+`waage-stock2` / `waage-stock3` sind als Vorgabe eingetragen und
+funktionieren sofort. **Empfehlung für die Praxis: stattdessen den
+Standort verwenden** — `waage-garten`, `waage-streuobst`, `waage-hausecke`.
+
+Grund: `geraete_name` und `anzeige_name` bilden die entity_id in HA
+(`"Waage eG"` + `"Gewicht"` → `sensor.waage_eg_gewicht`). Wird später
+umbenannt, legt HA **neue** Entities an, und Verlauf, Helfer, Automationen
+und Dashboard hängen an den alten, toten IDs. Durchnummerierte Namen laden
+genau dazu ein: sobald ein Volk eingeht, verkauft oder umgesetzt wird,
+passt die Nummerierung nicht mehr zur Realität. Ein Standortname bleibt
+richtig, auch wenn das Volk darin wechselt.
+
+**Solange ein Stock noch nicht geflasht ist, ist das Umbenennen gratis** —
+drei Zeilen in der Stock-Datei. Danach kostet es die Historie.
+
+`waage-eg` bleibt aus genau diesem Grund unverändert.
+
+### Zugangsdaten
+
+Alle Stöcke teilen sich standardmäßig WLAN, API-Key und OTA-Passwort aus
+`secrets.yaml`. Das ist zulässig und hält `secrets.yaml` klein. Wer pro
+Gerät eigene Schlüssel will, legt sie unter eigenem Namen in
+`secrets.yaml` an und überschreibt den Block in der jeweiligen Stock-Datei
+(dort auskommentiert vorbereitet) — Werte aus der Stock-Datei haben Vorrang
+vor denen aus dem Package.
+
+Für `waage-eg` bewusst **nicht** gemacht: ein neuer API-Key erzwingt ein
+erneutes Hinzufügen des Geräts in HA und riskiert genau die Entity-IDs,
+die erhalten bleiben sollen.
 
 ## Kalibrieren
 
@@ -349,7 +419,21 @@ sie abgebrochen sind (`Span nur ... counts`, `Referenzgewicht ungueltig`).
 
 ```bash
 esphome config waage-eg.yaml
+esphome config waage-stock2.yaml
+esphome config waage-stock3.yaml
 ```
 
 Geprüft gegen ESPHome 2026.6.5 - siehe Abschnitt "Validierung" in den
 Projektnotizen.
+
+Bei der Umstellung auf packages wurde die aufgelöste Konfiguration von
+`waage-eg` vorher und nachher verglichen: identisch bis auf den zusätzlichen
+`substitutions:`-Block. Wer eine Änderung an der Basis nachprüfen will, kann
+das genauso machen:
+
+```bash
+esphome config waage-eg.yaml > vorher.txt
+# ... Änderung ...
+esphome config waage-eg.yaml > nachher.txt
+diff vorher.txt nachher.txt
+```

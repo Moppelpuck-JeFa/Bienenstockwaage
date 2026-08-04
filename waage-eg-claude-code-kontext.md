@@ -168,7 +168,11 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
 
 ```
 Bienenstockwaage/
-├── waage-eg.yaml                      # ESPHome-Konfiguration (einzige Codedatei)
+├── packages/waage-basis.yaml          # GESAMTE gemeinsame Logik - die eigentliche
+│                                       #   Codedatei. Wird nicht direkt geflasht.
+├── waage-eg.yaml                      # Stock 1: nur substitutions + package-Include
+├── waage-stock2.yaml                  # Stock 2, dito
+├── waage-stock3.yaml                  # Stock 3, dito
 ├── secrets.yaml.example               # Vorlage: wifi_ssid, wifi_password,
 │                                       #   ap_fallback_password, api_encryption_key, ota_password
 ├── waage-eg-notes.md                  # Entscheidungen, Begründungen, HA-Seite
@@ -177,6 +181,30 @@ Bienenstockwaage/
 ├── README.md                          # Inbetriebnahme, Kalibrieren, Fehlersuche
 └── .gitignore                         # secrets.yaml, .esphome/, *.bin
 ```
+
+**Aufteilung Basis/Stock (seit 04.08.2026):** Alles Gemeinsame liegt in
+`packages/waage-basis.yaml`, alles Stock-Spezifische in `substitutions` der
+jeweiligen Stock-Datei (`geraete_name`, `anzeige_name`, `ap_ssid`, die fünf
+Pins, die Kalibrier-Startwerte, die Startwerte der Einstell-Entities). Eine
+Änderung an der Basis wirkt nach dem nächsten Flash auf alle Stöcke.
+
+Zwei Dinge, die dabei leicht schiefgehen:
+
+- **Die Stock-Dateien müssen im Root bleiben.** Das ESPHome Device Builder
+  Add-on listet nur YAML-Dateien direkt in `/config/esphome/` als Geräte.
+  `packages/` liegt bewusst darunter, damit die Basis nicht als nicht
+  flashbares Pseudo-Gerät im Dashboard auftaucht. Beim Kopieren ins
+  Add-on-Verzeichnis muss `packages/` mit.
+- **`geraete_name` + `anzeige_name` sind die entity_id in HA.** Für
+  `waage-eg` unverändert gelassen (`waage-eg` / `Waage eG`), sonst legt HA
+  neue Entities an und Helfer/Automationen/Dashboard zeigen ins Leere.
+  Bei neuen Stöcken vor dem ersten Flash festlegen — danach ist Umbenennen
+  teuer. Empfehlung: Standortnamen statt Durchnummerierung (Begründung im
+  README, Abschnitt "Mehrere Stöcke").
+
+Nachweis der Verhaltensgleichheit: `esphome config waage-eg.yaml` vor und
+nach der Umstellung liefert dieselbe aufgelöste Konfiguration, bis auf den
+zusätzlichen `substitutions:`-Block.
 
 **Nicht im Repo (lebt nur in HA):** Helfer, Automationen, Dashboard `bienen-stockwaage`.
 
