@@ -10,6 +10,7 @@ weitere Stöcke ohne Code-Duplizierung dazukommen (siehe
 
 | Datei | Inhalt |
 |-------|--------|
+| [`CLAUDE.md`](CLAUDE.md) | Kurzanleitung für Claude Code: Prüfbefehle, Architektur, harte Regeln. Wird bei jeder Session automatisch geladen |
 | [`packages/waage-basis.yaml`](packages/waage-basis.yaml) | Die gesamte gemeinsame Logik - der eigentliche Code. Wird nicht direkt geflasht |
 | [`packages/waage-temperatur.h`](packages/waage-temperatur.h) | Die Formel der Temperaturkompensation, an einer Stelle statt an dreien |
 | [`waage-eg.yaml`](waage-eg.yaml) | Stock 1 "Waage eG": nur substitutions + package-Include |

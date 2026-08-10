@@ -296,6 +296,8 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
 
 ```
 Bienenstockwaage/
+├── CLAUDE.md                          # Kurzanleitung fuer Claude Code, wird
+│                                       #   automatisch geladen. Zeigt hierher.
 ├── packages/waage-basis.yaml          # GESAMTE gemeinsame Logik - die eigentliche
 │                                       #   Codedatei. Wird nicht direkt geflasht.
 ├── packages/waage-temperatur.h        # Formel der Temperaturkompensation, einmal
@@ -451,9 +453,16 @@ Gegenprobe mit Ohmmeter: E+/E− und A+/A− müssen etwa gleich sein (~1 kΩ).
 
 ---
 
-## 8. Vorschlag: Einstiegs-Prompt für Claude Code
+## 8. Einstiegs-Prompt für Claude Code
 
-Kopiere diesen Block als ersten Prompt in Claude Code, nachdem du das Repo geklont hast:
+**Seit dem 10.08.2026 liegt eine [`CLAUDE.md`](CLAUDE.md) im Root.** Claude Code
+lädt sie bei jeder Session automatisch — Prüfbefehle, Architektur, harte Regeln
+und ein Verweis auf diese Datei hier sind damit immer im Kontext. Für die
+meisten Aufgaben reicht es also, einfach loszulegen.
+
+Der Block unten bleibt trotzdem nützlich: für andere Werkzeuge ohne
+CLAUDE.md-Unterstützung, und wenn du diese Datei ausdrücklich vollständig
+gelesen haben willst (die CLAUDE.md verweist nur darauf, sie enthält sie nicht).
 
 ```
 Ich arbeite an einer ESPHome-Bienenstockwaage (ESP8266 D1 Mini + HX711), die bereits
