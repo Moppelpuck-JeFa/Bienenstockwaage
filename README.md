@@ -417,13 +417,18 @@ Drei Diagnose-Entities beantworten die Frage, wo es klemmt. Sie stehen in HA
 unter "Diagnose" und werden bei jeder Messung aktualisiert.
 
 **1. "Waage eG Kalibrierfaktor"** — der wichtigste Wert. An diesem Aufbau
-gemessen: **−17.900 counts/kg**.
+gemessen: **−20.874 counts/kg** (Stand 10.08.2026).
+
+> Frühere Kalibrierungen dieses Aufbaus ergaben −17.900 und −20.840. Die
+> Streuung kommt von der Kalibrierung selbst, nicht von der Hardware; der
+> Erwartungsbereich für die Fehlersuche ist deshalb **−18.000 bis −21.000**.
 
 | Anzeige | Bedeutung |
 |---|---|
 | **exakt 3.500** | Eindeutig: die Kalibrierung ist auf die Platzhalter zurückgefallen. Neu kalibrieren. |
 | sehr groß (>100.000) | Beim Kalibrieren war der Span zu klein — Gewicht lag nicht auf, oder es wurde nicht ~1 min gewartet. Neu kalibrieren. |
-| ~±17.900 | Die Umrechnung ist in Ordnung, weiter bei Punkt 2. |
+| ~±18.000 bis ±21.000 | Die Umrechnung ist in Ordnung, weiter bei Punkt 2. |
+| rund die **Hälfte** des Erwartungswerts | Nur „Kalibrieren Referenzgewicht" gedrückt, der Nullpunkt fehlt. Erkennbar auch an leerem „Kalibriert bei". Beide Schritte fahren. |
 
 Der Wert **3.500** ist die schärfste Diagnose, weil er sich exakt aus den
 Platzhaltern ergibt (1750 counts / 0,5 kg) und mit keiner realen Kalibrierung
@@ -466,11 +471,12 @@ Rohwert nach *unten* zieht, ist die Frage, wie weit es bis zum unteren
 Anschlag (−8.388.608) noch ist. Schau in "Waage eG Rohwert" bei leerer Waage:
 
 ```
-verbleibende Kapazität in kg = (Rohwert + 8.388.608) / 17.900
+verbleibende Kapazität in kg = (Rohwert + 8.388.608) / 20.874
 ```
 
-Bei einem Rohwert von z. B. +600.000 sind das rund 500 kg Vorrat — völlig
-unkritisch. Läge der Rohwert dagegen schon tief im Negativen, könnte ein voller
+Bei einem Rohwert von z. B. +600.000 sind das rund 430 kg Vorrat — völlig
+unkritisch; die real gemessenen ~26.700 counts bei leerer Waage ergeben rund
+400 kg, das mechanische Limit von 200 kg greift also lange vorher. Läge der Rohwert dagegen schon tief im Negativen, könnte ein voller
 Stock den Wandler in die Sättigung fahren; dann A+/A− tauschen und neu
 kalibrieren.
 

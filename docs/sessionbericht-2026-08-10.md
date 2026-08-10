@@ -266,6 +266,10 @@ verhindert.
 
 ## 4. Nach dem Flash zu prüfen
 
+*Diese Liste wurde vor dem Flash geschrieben. Wie sie ausgegangen ist, steht in
+Abschnitt 3a — kurz: Punkt 1 ist eingetreten, es musste neu kalibriert werden.
+Für den nächsten Flash gilt sie unverändert weiter.*
+
 1. **Kalibrierfaktor** — erwartet rund **−20.845 counts/kg**. Dieser Flash
    bringt ein neues Global (`letzte_temperatur`) mit, und genau das hat am
    03.08. die Kalibrierung gekostet. Steht dort der Platzhalter 3.500: **beide**
@@ -307,8 +311,10 @@ morgens, wenn die Temperatur nahe an den 24,6 °C des Bezugspunkts liegt.
 - **HA-Seite für die neuen Stöcke:** Helfer, Automationen, Dashboard.
 - `input_number.leergewicht_beute` / `mindestgewicht_mit_futter` stehen auf
   18 bzw. 29 kg — Plausibilität prüfen.
-- **Doku-Widersprüche:** an einigen Stellen stehen noch −17.900 counts/kg,
-  gemessen sind −20.845.
+- ~~**Doku-Widersprüche beim Kalibrierfaktor**~~ — bereinigt. README und
+  Projektnotizen nennen jetzt den gültigen Wert (−20.874) und als
+  Erwartungsbereich für die Fehlersuche −18.000 bis −21.000; die älteren Zahlen
+  stehen nur noch dort, wo sie historisch gemeint sind.
 - **Ruhestrom messen**, bevor der Akku geplant wird.
 - **`reboot_timeout: 0s`** nimmt dem Gerät die Selbstheilung bei hängendem WLAN.
 - Deep Sleep: Pin-Blocker beseitigt, Rest in `deep-sleep-vorbereitung.md`.

@@ -14,7 +14,9 @@ ESPHome Device Builder Add-on in Home Assistant.
   Ohmmeter-Prüfung: [`docs/waegezellen-verkabelung.md`](docs/waegezellen-verkabelung.md),
   Abschnitt 0.
   Elektrisch kommt am ESP nur **1 HX711-Signal** an, am Code ändert sich nichts.
-- **Am Aufbau GEMESSENER Kalibrierfaktor: −17.900 counts/kg.** Die
+- **Am Aufbau GEMESSENER Kalibrierfaktor: −17.900 counts/kg** (erste
+  Kalibrierung; spätere ergaben −20.840 und zuletzt am 10.08.2026 **−20.874**,
+  der aktuell gültige Wert). Die
   Faustregel "Halbbrücken liefern ~1 mV/V, also ~9.000 counts/kg" war zu
   pessimistisch - die reale Messung ist maßgeblich. Zurückgerechnet
   entspricht das ~1,67 mV/V bei 200 kg Gesamtkapazität. Der Faktor hängt
@@ -43,14 +45,15 @@ ESPHome Device Builder Add-on in Home Assistant.
 Rein rechnerisch wären sogar 10 g (179 counts) noch darstellbar. Begrenzend
 bleibt die Mechanik, nicht der Wandler.
 
-## Negative Signalpolarität (Faktor −17.900)
+## Negative Signalpolarität (negativer Faktor)
 
 Ein negativer Kalibrierfaktor heißt nur, dass Last den Rohwert *senkt*.
 Die Zwei-Punkt-Kalibrierung ist davon unberührt, weil sie ausschließlich mit
 der Differenz `calib_raw_ref − calib_raw_zero` rechnet: negativer Hub geteilt
 durch negativen Span ergibt wieder ein positives Gewicht.
 
-Getestet mit invertierter Polarität (Nullpunkt 600.000, −17.900 counts/kg,
+Getestet mit invertierter Polarität (Nullpunkt 600.000, −17.900 counts/kg -
+der damals gemessene Faktor; am Ergebnis ändert die genaue Zahl nichts,
 Kalibrierung auf 10 kg): leer → 0,0 | Referenzpunkt → 10,0 | 37,4 | 132,6 |
 −2,5 kg beim Abheben → −2,5. Tara bei 23,4 kg ergibt korrekt `tare_offset =
 +23,400`, danach 31,9 kg brutto → 8,5 kg. Die Span-Prüfung greift dank `fabs`

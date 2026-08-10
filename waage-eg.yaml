@@ -11,11 +11,14 @@
 # geaendert, legt HA neue Entities an; Verlauf, Helfer, Automationen und
 # Dashboard haengen danach an den alten, toten IDs.
 #
-# Beim Flashen nach der Package-Umstellung: Der Kalibrierfaktor kann durch
-# den Flash verloren gehen (am 03.08.2026 real passiert). Also nach dem
-# Flash "Waage eG Kalibrierfaktor" pruefen - erwartet werden rund
-# -20.840 counts/kg. Steht dort der Platzhalter, BEIDE Kalibrierschritte
-# neu fahren, nicht nur den Referenzpunkt.
+# Bei JEDEM Flash: Der Kalibrierfaktor kann verloren gehen - am 03.08.2026
+# und am 10.08.2026 real passiert, beide Male brachte der Flash ein neues
+# Global mit. Also nach dem Flash "Waage eG Kalibrierfaktor" pruefen,
+# erwartet werden -18.000 bis -21.000 counts/kg (zuletzt gemessen: -20.874).
+# Steht dort der Platzhalter 3.500 oder rund die Haelfte des Erwartungswerts,
+# BEIDE Kalibrierschritte neu fahren, nicht nur den Referenzpunkt.
+# Ebenfalls pruefen: "Kalibriert bei" darf nicht leer sein - sonst fehlt der
+# Bezugspunkt und die Temperaturkompensation schaltet sich stumm ab.
 # =====================================================================
 
 substitutions:
