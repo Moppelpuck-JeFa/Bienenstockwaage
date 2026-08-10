@@ -11,11 +11,14 @@
 # geaendert, legt HA neue Entities an; Verlauf, Helfer, Automationen und
 # Dashboard haengen danach an den alten, toten IDs.
 #
-# Beim Flashen nach der Package-Umstellung: Der Kalibrierfaktor kann durch
-# den Flash verloren gehen (am 03.08.2026 real passiert). Also nach dem
-# Flash "Waage eG Kalibrierfaktor" pruefen - erwartet werden rund
-# -20.840 counts/kg. Steht dort der Platzhalter, BEIDE Kalibrierschritte
-# neu fahren, nicht nur den Referenzpunkt.
+# Bei JEDEM Flash: Der Kalibrierfaktor kann verloren gehen - am 03.08.2026
+# und am 10.08.2026 real passiert, beide Male brachte der Flash ein neues
+# Global mit. Also nach dem Flash "Waage eG Kalibrierfaktor" pruefen,
+# erwartet werden -18.000 bis -21.000 counts/kg (zuletzt gemessen: -20.874).
+# Steht dort der Platzhalter 3.500 oder rund die Haelfte des Erwartungswerts,
+# BEIDE Kalibrierschritte neu fahren, nicht nur den Referenzpunkt.
+# Ebenfalls pruefen: "Kalibriert bei" darf nicht leer sein - sonst fehlt der
+# Bezugspunkt und die Temperaturkompensation schaltet sich stumm ab.
 # =====================================================================
 
 substitutions:
@@ -43,6 +46,15 @@ substitutions:
   start_referenzgewicht: "0.5"
   start_messintervall: "360"        # min (= 6 h)
   start_durchsicht_dauer: "60"      # min
+
+  # Temperaturkoeffizient, gemessen an DIESEM Aufbau: 03.-10.08.2026,
+  # 164 Messpunkte ueber 6,8 Tage und 9,4 K Temperaturhub.
+  # Herleitung und Guete: docs/sessionbericht-2026-08-10.md
+  #
+  # Wie alle start_-Werte nur der Startwert fuer den allerersten Boot. Ist die
+  # Number-Entity "Waage eG Temperaturkoeffizient" einmal gesetzt, gilt der
+  # Wert aus HA - diese Zahl hier aendern bringt dann nichts mehr.
+  start_temp_koeffizient: "32.5"    # g/K
 
 packages:
   basis: !include packages/waage-basis.yaml

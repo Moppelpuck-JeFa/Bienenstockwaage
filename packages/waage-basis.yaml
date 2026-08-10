@@ -70,9 +70,26 @@ substitutions:
   start_messintervall: "360"        # min (= 6 h)
   start_durchsicht_dauer: "60"      # min
 
+  # Temperaturkoeffizient der Waage in Gramm pro Kelvin.
+  # Positiv heißt: die Waage zeigt bei Wärme MEHR an, gerechnet wird deshalb
+  # kg -= (Temperatur - calib_temp) * koeffizient.
+  #
+  # 32,5 g/K ist an waage-eg über 6,8 Tage und 9,4 K gemessen
+  # (docs/sessionbericht-2026-08-10.md). Der Wert gilt für DIESE vier Zellen
+  # an DIESEM Aufbau und ist für einen anderen Stock nur eine Hausnummer -
+  # neue Stöcke starten deshalb mit 0 (= Kompensation aus), bis ihr eigener
+  # Koeffizient gemessen ist.
+  start_temp_koeffizient: "32.5"    # g/K
+
 esphome:
   name: ${geraete_name}
   friendly_name: "${anzeige_name}"
+  # Die Formel der Temperaturkompensation, damit sie nicht an drei Stellen
+  # ausgeschrieben werden muss. Der Pfad löst gegen das Verzeichnis der
+  # geflashten Stock-Datei auf (/config/esphome/), nicht gegen packages/ -
+  # beim Kopieren ins Add-on-Verzeichnis muss packages/ also mit.
+  includes:
+    - packages/waage-temperatur.h
 
 esp8266:
   board: ${board}
@@ -148,15 +165,30 @@ globals:
     type: float
     restore_value: yes
     initial_value: '${start_calib_kg_ref}'
-  # Temperatur zum Zeitpunkt der Nullpunkt-Kalibrierung.
-  # Wird aktuell NICHT verrechnet - nur festgehalten. Für eine spätere
-  # Temperaturkompensation ist genau dieser Wert der Bezugspunkt
-  # (kg -= (temp_jetzt - calib_temp) * koeffizient). Er lässt sich nachträglich
-  # nicht rekonstruieren, deshalb wird er schon jetzt mitgespeichert - sonst
-  # müsste man später nur deswegen neu kalibrieren.
+  # Temperatur zum Zeitpunkt der Nullpunkt-Kalibrierung. BEZUGSPUNKT der
+  # Temperaturkompensation: gerechnet wird kg -= (temp_jetzt - calib_temp) *
+  # koeffizient. Bei genau dieser Temperatur ist die Korrektur also null, und
+  # die Anzeige entspricht exakt dem, was ohne Kompensation herauskäme.
+  #
+  # Steht hier NAN, wurde "Kalibrieren 0kg" nie gedrückt - dann gibt es keinen
+  # Bezugspunkt und die Kompensation bleibt aus (siehe waage_gewicht).
   - id: calib_temp
     type: float
     restore_value: yes
+    initial_value: 'NAN'
+  # Letzte gültige Temperatur. Ersatzwert, falls ein einzelner 1-Wire-Lesevorgang
+  # fehlschlägt (der DS18B20 veröffentlicht dann NAN).
+  #
+  # Warum überhaupt: Ohne Ersatzwert würde die Kompensation bei einem Aussetzer
+  # stumm ausfallen und das Gewicht um bis zu 0,3 kg springen - das sähe in HA
+  # aus wie ein echtes Ereignis (Schwarm, Ernte) und würde die Tagesbilanz
+  # verfälschen. Ein 60 s alter Temperaturwert ist demgegenüber harmlos.
+  # Bewusst NICHT restore_value: nach einem Neustart soll die Waage nicht mit
+  # einer tagealten Temperatur weiterrechnen, sondern auf den ersten frischen
+  # Messwert warten (das dauert höchstens 60 s).
+  - id: letzte_temperatur
+    type: float
+    restore_value: no
     initial_value: 'NAN'
   # Zählt die Minuten seit der letzten Veröffentlichung an HA.
   # Bewusst NICHT restore_value - nach einem Neustart soll sofort
@@ -234,7 +266,8 @@ sensor:
       # weiter unten über die beiden Kalibrier-Buttons.
 
   # Das ist der Sensor, den du in Home Assistant siehst - live aus den
-  # beiden Kalibrierpunkten berechnet, Tara abgezogen, auf 0,1 kg gerundet
+  # beiden Kalibrierpunkten berechnet, temperaturkompensiert, Tara abgezogen,
+  # auf 0,1 kg gerundet
   - platform: template
     id: waage_gewicht
     name: "Gewicht"
@@ -260,6 +293,14 @@ sensor:
       if (span != 0.0) {
         kg = (raw - id(calib_raw_zero)) * id(calib_kg_ref) / span;
       }
+      // --- Temperaturkompensation ---
+      // Die Wägezellen driften mit der Temperatur; an waage-eg gemessen sind
+      // das +32,5 g/K (die Waage zeigt bei Wärme zu viel). Bezugspunkt ist die
+      // beim Nullpunkt festgehaltene Temperatur - dort ist die Korrektur null.
+      // Die Formel steht in packages/waage-temperatur.h.
+      kg -= waage_temperaturkorrektur(id(letzte_temperatur),
+                                      id(calib_temp),
+                                      id(temp_koeffizient).state);
       kg -= id(tare_offset);
       // Auf 0,1 kg genau runden. Bewusst *10 und /10 statt /0.1 und *0.1 -
       // 0.1 ist binär nicht exakt darstellbar, der Umweg über die 10 ist
@@ -272,14 +313,15 @@ sensor:
       return gerundet;
 
   # DS18B20. Läuft BEWUSST auf einem eigenen 60s-Takt statt im Messintervall
-  # der Waage. Zwei Gründe: der Wert ist damit für die Kalibrier-Buttons immer
-  # frisch (max. 60s alt), und für die geplante Driftanalyse ist eine dichtere
-  # Temperaturreihe neben einer groben Gewichtsreihe besser als umgekehrt -
-  # herunterrechnen kann man später immer, nachträglich verdichten nicht.
+  # der Waage. Zwei Gründe: der Wert geht in die Gewichtsberechnung ein und
+  # soll dort nie älter als eine Minute sein, und für die Driftanalyse ist eine
+  # dichte Temperaturreihe neben einer groben Gewichtsreihe besser als
+  # umgekehrt - herunterrechnen kann man später immer, verdichten nicht.
   #
-  # Der Wert wird NICHT in die Gewichtsberechnung eingerechnet. Er dient
-  # ausschließlich dazu, erst einmal Daten über die reale Temperaturdrift zu
-  # sammeln. Erst danach entscheiden, ob und wie kompensiert wird.
+  # Seit dem 10.08.2026 wird der Wert VERRECHNET (+32,5 g/K, gemessen über
+  # 6,8 Tage und 9,4 K). Die Messreihe läuft trotzdem unverändert weiter: der
+  # Rohwert bleibt unkompensiert, damit sich der Koeffizient jederzeit gegen
+  # neue Daten nachprüfen lässt.
   #
   # Keine "address:" angegeben - bei genau einem Sensor am Bus sucht ESPHome
   # ihn selbst. Kommt ein zweiter dazu, braucht JEDER eine explizite Adresse
@@ -289,6 +331,20 @@ sensor:
     name: "Temperatur"
     update_interval: 60s
     resolution: 12
+    on_value:
+      # Jeden gültigen Messwert festhalten. Damit rechnet die Kompensation
+      # immer mit einer höchstens 60 s alten Temperatur und überbrückt einen
+      # einzelnen fehlgeschlagenen 1-Wire-Lesevorgang, statt bei einem
+      # Aussetzer stumm auszufallen (das Gewicht spränge sonst um bis zu
+      # 0,3 kg - in HA nicht von einem echten Ereignis zu unterscheiden).
+      - lambda: |-
+          if (!std::isnan(x)) {
+            id(letzte_temperatur) = x;
+          } else {
+            ESP_LOGW("waage", "DS18B20 lieferte keinen Wert - Kompensation "
+                              "rechnet mit %.2f C weiter",
+                     id(letzte_temperatur));
+          }
 
   # --- Diagnose ---
   # Der gefilterte HX711-Rohwert, so wie ihn die Buttons und die Umrechnung
@@ -326,8 +382,36 @@ sensor:
       }
       return span / id(calib_kg_ref);
 
-  # Temperatur zum Zeitpunkt der Nullpunkt-Kalibrierung. Aktuell rein
-  # informativ - Bezugspunkt für eine mögliche spätere Kompensation.
+  # Was die Temperaturkompensation gerade vom Bruttogewicht abzieht.
+  #
+  # Der wichtigste Wert, um die Kompensation überhaupt beurteilen zu können:
+  # Ohne ihn sieht man in HA nur noch das fertige Gewicht und kann nicht mehr
+  # unterscheiden, ob eine Änderung aus dem Stock kommt oder aus der Rechnung.
+  # Steht hier dauerhaft 0, ist die Kompensation aus - entweder weil der
+  # Koeffizient 0 ist oder weil "Kalibriert bei" leer ist (dann fehlt der
+  # Bezugspunkt und es wird bewusst nicht kompensiert).
+  #
+  # Vorzeichen wie im Gewicht: ein POSITIVER Wert wird abgezogen, die Waage
+  # zeigte also ohne Kompensation zu viel an.
+  - platform: template
+    id: temperaturkorrektur
+    name: "Temperaturkorrektur"
+    icon: "mdi:thermometer-lines"
+    unit_of_measurement: "kg"
+    accuracy_decimals: 3
+    device_class: weight
+    # Bewusst OHNE state_class: das ist kein Messwert, sondern ein
+    # Rechenanteil. In der Langzeitstatistik hätte er nichts zu suchen.
+    entity_category: diagnostic
+    update_interval: never
+    lambda: |-
+      return waage_temperaturkorrektur(id(letzte_temperatur),
+                                       id(calib_temp),
+                                       id(temp_koeffizient).state);
+
+  # Temperatur zum Zeitpunkt der Nullpunkt-Kalibrierung: der Bezugspunkt der
+  # Kompensation. Ist der Wert leer, wurde "Kalibrieren 0kg" nie gedrückt -
+  # dann kompensiert die Waage bewusst NICHT.
   - platform: template
     id: kalibriert_bei
     name: "Kalibriert bei"
@@ -435,6 +519,7 @@ button:
           id(kalibrierfaktor).update();
           id(kalibriert_mit).update();
           id(kalibriert_bei).update();
+          id(temperaturkorrektur).update();
           // Der DS18B20 laeuft zwar ohnehin im 60s-Takt, aber "Jetzt messen"
           // soll wirklich alles frisch machen
           id(temperatur).update();
@@ -454,14 +539,25 @@ button:
           }
           float span = id(calib_raw_ref) - id(calib_raw_zero);
           if (span != 0.0) {
-            id(tare_offset) = (raw - id(calib_raw_zero)) * id(calib_kg_ref) / span;
-            ESP_LOGI("waage", "Tara gesetzt: %.3f kg (roh %.1f)",
-                     id(tare_offset), raw);
+            float brutto = (raw - id(calib_raw_zero)) * id(calib_kg_ref) / span;
+            // WICHTIG: Die Temperaturkorrektur muss hier mit abgezogen werden,
+            // genau wie in der Anzeige. Sonst friert das Tara die Korrektur
+            // des Druckzeitpunkts ein und wandert mit jedem Grad wieder ins
+            // Gewicht zurück - die Waage stünde nach dem Tarieren zwar auf
+            // null, liefe über den Tag aber um den vollen Temperaturhub weg.
+            float korrektur = waage_temperaturkorrektur(
+                id(letzte_temperatur), id(calib_temp),
+                id(temp_koeffizient).state);
+            id(tare_offset) = brutto - korrektur;
+            ESP_LOGI("waage", "Tara gesetzt: %.3f kg (roh %.1f, "
+                              "Temperaturkorrektur %.3f kg)",
+                     id(tare_offset), raw, korrektur);
           } else {
             ESP_LOGW("waage", "Tara ignoriert: Waage noch nicht kalibriert");
           }
       - component.update: waage_gewicht
       - component.update: rohwert
+      - component.update: temperaturkorrektur
 
   # Kalibrierung Schritt 1: Waage LEER lassen, ~1min warten, dann drücken
   - platform: template
@@ -477,12 +573,16 @@ button:
           id(calib_raw_zero) = raw;
           // Ein frisch gesetzter Nullpunkt macht ein altes Tara sinnlos
           id(tare_offset) = 0.0;
-          // Temperatur mitschreiben - Bezugspunkt fuer eine spaetere
-          // Kompensation. Wird aktuell NICHT verrechnet.
-          id(calib_temp) = id(temperatur).state;
+          // Temperatur mitschreiben: ab hier ist SIE der Bezugspunkt der
+          // Kompensation. Alle Korrekturen zaehlen von diesem Wert aus, die
+          // Anzeige ist also genau bei dieser Temperatur unkorrigiert.
+          id(calib_temp) = id(letzte_temperatur);
           if (std::isnan(id(calib_temp))) {
             ESP_LOGW("waage", "Nullpunkt gesetzt, aber ohne Temperatur - "
-                              "DS18B20 liefert (noch) keinen Wert");
+                              "DS18B20 liefert (noch) keinen Wert. Die "
+                              "Temperaturkompensation bleibt damit AUS. "
+                              "Nach dem ersten Temperaturwert (max. 60 s) "
+                              "erneut 'Kalibrieren 0kg' druecken.");
           } else {
             ESP_LOGI("waage", "Nullpunkt-Temperatur festgehalten: %.1f C",
                      id(calib_temp));
@@ -495,6 +595,9 @@ button:
       # dadurch ebenfalls und muss neu veroeffentlicht werden
       - component.update: kalibrierfaktor
       - component.update: kalibriert_bei
+      # Der Bezugspunkt hat sich geaendert, damit auch die Korrektur
+      # (unmittelbar nach dem Kalibrieren ist sie 0)
+      - component.update: temperaturkorrektur
 
   # Kalibrierung Schritt 2: Referenzgewicht auflegen, dessen Masse vorher in
   # die Number-Entity "Referenzgewicht" eintragen, ~1min warten, dann drücken
@@ -593,6 +696,50 @@ number:
           id(waage_gewicht).update();
           id(waage_uptime).update();
           ESP_LOGI("waage", "Messintervall auf %.0f min gesetzt", x);
+
+  # Temperaturkoeffizient der Wägezellen in g/K.
+  #
+  # BEWUSST AUS HA EINSTELLBAR statt fest im Code: Der Koeffizient ist eine
+  # Messgröße, kein Naturgesetz. Er hängt an diesen vier Zellen, an dieser
+  # Verkabelung und am Aufbau; nach dem Umzug in den Garten (Sonne auf einer
+  # Seite, andere thermische Ankopplung) ist er neu zu bestimmen. Als Number
+  # kostet das eine Zahl in HA - fest im YAML kostete es einen Flash, und
+  # jeder Flash kann die Kalibrierung mitnehmen (03.08.2026 real passiert).
+  #
+  # 0 schaltet die Kompensation ab. Das ist die richtige Einstellung für einen
+  # Stock, dessen Koeffizient noch nicht gemessen ist: ein geratener Wert
+  # macht die Messung schlechter, nicht besser - und man sieht es nicht, weil
+  # das Ergebnis weiter plausibel aussieht.
+  #
+  # An waage-eg gemessen: +32,5 g/K (± 0,7 statistisch, real eher ± 3;
+  # Teilzeiträume der Messreihe lagen zwischen 28 und 35 g/K).
+  # Herleitung: docs/sessionbericht-2026-08-10.md
+  - platform: template
+    id: temp_koeffizient
+    name: "Temperaturkoeffizient"
+    icon: "mdi:thermometer-chevron-up"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: ${start_temp_koeffizient}
+    # Der Bereich ist absichtlich weit und beidseitig: ein negatives Vorzeichen
+    # ist physikalisch möglich (Waage zeigt bei Wärme WENIGER) und soll sich
+    # eintragen lassen, ohne dass jemand das YAML anfassen muss.
+    min_value: -200
+    max_value: 200
+    step: 0.1
+    unit_of_measurement: "g/K"
+    mode: box
+    on_value:
+      # Sofort sichtbar machen, was die neue Zahl bewirkt - sonst müsste man
+      # bei 6 h Messintervall einen halben Tag warten, um zu sehen, ob man
+      # sich vertippt hat. Der Intervallzähler läuft dabei bewusst WEITER:
+      # das hier ist eine Einstellung, keine planmäßige Messung.
+      - lambda: |-
+          ESP_LOGI("waage", "Temperaturkoeffizient auf %.1f g/K gesetzt "
+                            "(Bezugstemperatur %.2f C)", x, id(calib_temp));
+      - component.update: temperaturkorrektur
+      - component.update: waage_gewicht
 
   # Wie lange der Durchsichtmodus laeuft, bis er sich selbst beendet.
   # Eine Durchsicht dauert selten laenger als eine Stunde; wer mehr braucht,
@@ -717,6 +864,29 @@ interval:
             id(kalibrierfaktor).update();
             id(kalibriert_mit).update();
             id(kalibriert_bei).update();
+            id(temperaturkorrektur).update();
+            return;
+          }
+
+          // --- Nach dem Booten auf die erste Temperatur warten ---
+          // HX711 und DS18B20 laufen beide im 60-s-Takt und melden sich nach
+          // einem Neustart in unbestimmter Reihenfolge. Ohne diese Sperre
+          // koennte der allererste Wert nach jedem Neustart unkompensiert
+          // nach HA gehen und stuende dort dauerhaft als Stufe von bis zu
+          // 0,3 kg in der Statistik - genau die Sorte Artefakt, gegen die es
+          // schon den Durchsichtmodus gibt.
+          //
+          // Gewartet wird hoechstens 3 Minuten und nur dann, wenn die
+          // Kompensation ueberhaupt aktiv waere. Ein defekter DS18B20 legt
+          // die Waage damit nicht still, er kostet nur diese drei Minuten.
+          static uint8_t warte_auf_temperatur = 0;
+          if (std::isnan(id(letzte_temperatur)) && warte_auf_temperatur < 3 &&
+              !std::isnan(id(calib_temp)) &&
+              id(temp_koeffizient).state != 0.0f) {
+            warte_auf_temperatur++;
+            ESP_LOGI("waage", "Warte auf den ersten Temperaturwert, bevor der "
+                              "erste Messwert nach HA geht (%d/3)",
+                     warte_auf_temperatur);
             return;
           }
 
@@ -744,6 +914,7 @@ interval:
             id(kalibrierfaktor).update();
             id(kalibriert_mit).update();
             id(kalibriert_bei).update();
+            id(temperaturkorrektur).update();
           }
 
   # Signalisierung des Durchsichtmodus.

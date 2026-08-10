@@ -10,7 +10,9 @@ weitere Stöcke ohne Code-Duplizierung dazukommen (siehe
 
 | Datei | Inhalt |
 |-------|--------|
+| [`CLAUDE.md`](CLAUDE.md) | Kurzanleitung für Claude Code: Prüfbefehle, Architektur, harte Regeln. Wird bei jeder Session automatisch geladen |
 | [`packages/waage-basis.yaml`](packages/waage-basis.yaml) | Die gesamte gemeinsame Logik - der eigentliche Code. Wird nicht direkt geflasht |
+| [`packages/waage-temperatur.h`](packages/waage-temperatur.h) | Die Formel der Temperaturkompensation, an einer Stelle statt an dreien |
 | [`waage-eg.yaml`](waage-eg.yaml) | Stock 1 "Waage eG": nur substitutions + package-Include |
 | [`waage-stock2.yaml`](waage-stock2.yaml) | Stock 2, gleiche Bauart |
 | [`waage-stock3.yaml`](waage-stock3.yaml) | Stock 3, gleiche Bauart |
@@ -20,6 +22,8 @@ weitere Stöcke ohne Code-Duplizierung dazukommen (siehe
 | [`docs/deep-sleep-vorbereitung.md`](docs/deep-sleep-vorbereitung.md) | Was Batterie-/Solarbetrieb braucht: Verdrahtung, Strombilanz, YAML |
 | [`docs/sessionbericht-2026-08-03.md`](docs/sessionbericht-2026-08-03.md) | Temperaturdrift ausgewertet, Durchsichtmodus, Kalibrierungsverlust |
 | [`docs/sessionbericht-2026-08-04.md`](docs/sessionbericht-2026-08-04.md) | Umstellung auf substitutions/packages, Namensschema, ESPHome-Fallstricke |
+| [`docs/sessionbericht-2026-08-10.md`](docs/sessionbericht-2026-08-10.md) | Temperaturkompensation: Auswertung über 7 Tage und Einbau |
+| [`tests/waage-temperatur-test.cpp`](tests/waage-temperatur-test.cpp) | Prüfprogramm für die Kompensationsformel (`g++`, ohne Hardware) |
 
 `secrets.yaml` selbst ist per `.gitignore` ausgeschlossen und gehört nicht ins Repo.
 
@@ -64,8 +68,10 @@ Details zur Verdrahtung und zum Rest der Deep-Sleep-Vorbereitung:
   überleben einen Neustart
 - **Referenzgewicht frei wählbar** (0,1 bis 50 kg) - je schwerer, desto genauer
 - **Tara-Button**, unabhängig von der Kalibrierung
-- **Temperaturmessung** (DS18B20) — wird bewusst **nicht** in das Gewicht
-  eingerechnet, sondern nur aufgezeichnet. Siehe unten.
+- **Temperaturkompensation** (DS18B20) — die Wägezellen driften mit der
+  Temperatur; an "Waage eG" gemessene **+32,5 g/K** werden aus dem Gewicht
+  herausgerechnet. Der Koeffizient ist aus HA einstellbar, `0` schaltet die
+  Kompensation ab. Siehe unten.
 - **Verbindungsstatus und WLAN-Signal** als Diagnose — damit ein Ausfall
   auffällt, statt dass die Sensoren still ihren letzten Wert behalten
 - Fallback-Hotspot, OTA-Updates, Webserver auf Port 80
@@ -189,9 +195,14 @@ Nullpunkt seine Bedeutung verliert.
 ### Was 0,1 kg realistisch heißt
 
 Die **Auflösung** ist 0,1 kg - so fein wird angezeigt. Die **Genauigkeit** des
-Absolutwerts liegt realistisch bei ±0,1 bis ±0,5 kg, begrenzt durch
-Temperaturdrift, Kriechen und vor allem den Eckenfehler der Wägezellen (nicht
-durch die Elektronik - der HX711 hat hier reichlich Reserve).
+Absolutwerts liegt realistisch bei ±0,1 bis ±0,5 kg, begrenzt durch Kriechen
+und vor allem den Eckenfehler der Wägezellen (nicht durch die Elektronik - der
+HX711 hat hier reichlich Reserve).
+
+Der vierte Posten, die **Temperaturdrift**, war mit rund 0,65 kg über einen
+Sommertag der mit Abstand größte - er wird seit dem 10.08.2026
+herausgerechnet, siehe [Temperaturkompensation](#temperaturkompensation). Übrig
+bleibt davon eine Reststreuung von rund 15 g.
 
 Für das, worum es bei einer Stockwaage geht - Gewichts*änderung* über Stunden
 und Tage - ist das genau richtig, weil sich diese Fehler bei gleichbleibendem
@@ -199,8 +210,10 @@ Aufbau herauskürzen. Die letzte Nachkommastelle sollte man nur nicht als
 absolute Wahrheit lesen. Hintergrund in den Projektnotizen und in
 [`docs/waegezellen-verkabelung.md`](docs/waegezellen-verkabelung.md).
 
-Eine leere Waage kann dabei statt 0,0 auch mal ±0,1 anzeigen, wenn sie
-thermisch weggedriftet ist - dann hilft ein Druck auf "Tara".
+Eine leere Waage kann dabei statt 0,0 auch mal ±0,1 anzeigen - dann hilft ein
+Druck auf "Tara". Das Tara wird dabei gegen den **kompensierten** Wert gesetzt
+und hält deshalb über den Tagesgang; früher wanderte die Drift nach dem
+Tarieren wieder ins Gewicht zurück.
 
 ## Messintervall einstellen
 
@@ -279,53 +292,125 @@ Ein Neustart beendet den Modus. Das ist Absicht: eine Waage, die nach einem
 Stromausfall still im Durchsichtmodus hängt und wochenlang nichts mehr sendet,
 wäre schlimmer als einmal zu viel drücken.
 
-### Wichtig: der Schwarm-Alarm braucht eine Sperre
+### Der Schwarm-Alarm ist gegen Fehlauslöser gesperrt
 
 Nach der Durchsicht springt das Gewicht in einem Schritt auf den neuen Wert.
 Der Helfer für die Schwarm-Erkennung (Ableitung über 20 min in kg/h) sieht
 diesen Sprung als rasanten Gewichtsverlust — hast du eine Honigzarge
-abgenommen, **löst der Schwarm-Alarm zuverlässig fälschlich aus**.
+abgenommen, sähe das für ihn aus wie ein abgegangener Schwarm.
 
-Die Automation `Bienen: Schwarm-Alarm` braucht deshalb eine zusätzliche
-Bedingung. Die Sperre muss länger sein als das Ableitungsfenster von 20 min:
+Dasselbe gilt für **jeden** Sprung, der nicht vom Stock kommt. Am 10.08.2026
+hat der Alarm nach einer Neukalibrierung fehlausgelöst (−3,3 kg/h). Die
+Automation `Bienen: Schwarm-Alarm` hat deshalb seitdem **drei Sperren**
+zusätzlich zum Zeitfenster 9–18 Uhr:
 
-```yaml
-condition:
-  - condition: state
-    entity_id: switch.waage_eg_durchsichtmodus
-    state: "off"
-    for: "00:30:00"
+| Sperre | Fängt ab |
+|---|---|
+| `switch.waage_eg_durchsichtmodus` = off `for: 00:30:00` | Durchsicht, Honigernte |
+| `sensor.waage_eg_betriebszeit` > 1800 | Neustart der Waage — vor allem den Fall, dass ein Flash die Kalibrierung verliert |
+| Template: 30 min seit letzter Kalibrierung/Tara | Kalibrieren, Tarieren |
+
+**Alle drei sind 30 min lang, nicht 20** — die Sperre muss länger halten als
+das Ableitungsfenster, sonst steckt der Sprung beim Freigeben noch darin.
+
+Die dritte Sperre prüft `last_changed` von „Kalibrierfaktor", „Kalibriert bei"
+und den drei Buttons. Die Diagnose-Sensoren sind dabei die wichtigeren: Wird
+ein Button über die **ESPHome-Weboberfläche** statt über HA gedrückt, sieht HA
+den Druck nicht — die Sensoren ändern sich trotzdem. Einzige verbleibende
+Lücke ist ein Tara über die Weboberfläche.
+
+Warum dafür ein Template und nichts Natives: Eine `state`-Bedingung mit `for:`
+braucht einen festen Zielzustand. Der Zustand eines Buttons *ist* aber der
+Zeitstempel des letzten Drucks. Für „hat sich lange nicht geändert" gibt es in
+HA keine native Bedingung.
+
+Sinngemäß dasselbe fehlt noch für `Bienen: Futtervorrat kritisch` — dort ist es
+weniger dringend, weil der Schwellwert erst nach 2 h Überschreitung auslöst.
+
+## Temperaturkompensation
+
+Die Wägezellen driften mit der Temperatur: Bei Wärme zeigt die Waage mehr an,
+ohne dass sich am Stock etwas geändert hätte. An "Waage eG" sind das
+**+32,5 g/K**, gemessen über 6,8 Tage und 9,4 K Temperaturhub
+([`docs/sessionbericht-2026-08-10.md`](docs/sessionbericht-2026-08-10.md)).
+Über einen normalen Sommertag mit 20 K Tagesgang sind das **0,65 kg** — mehr
+als ein guter Trachttag einträgt. Deshalb wird gerechnet:
+
+```
+Gewicht = Bruttogewicht − (Temperatur − "Kalibriert bei") × Koeffizient − Tara
 ```
 
-Dasselbe gilt sinngemäß für `Bienen: Futtervorrat kritisch`.
+**Der Bezugspunkt ist die Temperatur beim Nullpunkt-Kalibrieren.** Sie steht in
+der Diagnose-Entity "Kalibriert bei". Genau dort ist die Korrektur null; die
+Anzeige entspricht dann exakt dem, was ohne Kompensation herauskäme. Ist
+"Kalibriert bei" leer, wurde "Kalibrieren 0 kg" nie gedrückt — dann fehlt der
+Bezugspunkt und es wird **bewusst nicht** kompensiert.
 
-## Temperatur: aufgezeichnet, nicht verrechnet
+### Die zwei Entities dazu
 
-Die Entity **"Waage eG Temperatur"** misst alle 60 Sekunden. Der Wert geht
-**nicht** in das angezeigte Gewicht ein — bewusst.
+| Entity | Bedeutung |
+|---|---|
+| `number.<stock>_temperaturkoeffizient` | Der Koeffizient in **g/K**. Einstellbar, `0` = Kompensation aus |
+| `sensor.<stock>_temperaturkorrektur` | Was gerade abgezogen wird, in kg. Diagnose |
 
-Grund: Die verbauten Zellen driften mit der Temperatur, aber wie stark, ist
-unbekannt. Ein geratener Korrekturkoeffizient macht die Messung schlechter,
-nicht besser — und man merkt es nicht, weil das Ergebnis weiter plausibel
-aussieht. Deshalb erst Daten sammeln.
+**Warum der Koeffizient aus HA einstellbar ist und nicht im YAML steht:** Er
+ist eine Messgröße, keine Konstante. Er hängt an diesen vier Zellen, an dieser
+Verkabelung und an diesem Aufbau. Nach dem Umzug in den Garten — Sonne auf
+einer Seite, andere thermische Ankopplung — ist er neu zu bestimmen. Als
+Number kostet das eine Zahl in HA; fest im YAML kostete es einen Flash, und
+**jeder Flash kann die Kalibrierung mitnehmen**.
 
-**So kommst du zu den Daten:** Eine konstante, bekannte Last auflegen (ein
-Sack Zucker reicht), Messintervall auf `15` stellen und ein paar Tage laufen
-lassen. Danach in HA Gewicht gegen Temperatur auftragen. Ergibt sich eine
-saubere Gerade, ist ihre Steigung der gesuchte Koeffizient. Streut die
-Punktwolke breit, dominieren thermische Gradienten zwischen den vier Zellen —
-die kann ein einzelner Sensor nicht korrigieren, dann lohnt die Kompensation
-nicht.
+**"Temperaturkorrektur" ist die Kontrollentity.** Ohne sie sieht man in HA nur
+noch das fertige Gewicht und kann nicht mehr unterscheiden, ob eine Änderung
+aus dem Stock kommt oder aus der Rechnung. Steht dort dauerhaft 0,000, ist die
+Kompensation aus.
 
-Die Diagnose-Entity **"Waage eG Kalibriert bei"** hält fest, bei welcher
-Temperatur zuletzt der Nullpunkt kalibriert wurde. Sie ist der Bezugspunkt für
-eine spätere Korrektur und lässt sich nachträglich nicht rekonstruieren —
-deshalb wird sie schon jetzt mitgeschrieben.
+**Der Rohwert bleibt unkompensiert.** "Rohwert" ist und bleibt der nackte
+HX711-Zählwert. Nur so lässt sich der Koeffizient später gegen neue Daten
+nachprüfen — ein bereits korrigierter Wert wäre für eine Nachmessung wertlos.
 
-**Die Variante ohne Sensor:** Gewicht immer zur selben Uhrzeit vergleichen,
-am besten vor Sonnenaufgang. Dann ist die Temperatur tagesübergreifend
-ähnlich und alle Bienen sind im Stock. Das kürzt den Tagesgang weitgehend
-heraus und reicht für Trachtbilanz und Futterverbrauch völlig.
+### Den Koeffizienten für einen neuen Stock bestimmen
+
+Neue Stöcke starten mit `0` (Kompensation aus). Der Wert von "Waage eG" lässt
+sich **nicht** übernehmen: ein geratener Koeffizient macht die Messung
+schlechter, nicht besser — und man merkt es nicht, weil das Ergebnis weiter
+plausibel aussieht.
+
+1. Kalibrieren (beide Schritte), dann eine **konstante Last** auflegen und
+   liegen lassen.
+2. Messintervall auf `15` oder `60` stellen und **mindestens fünf Tage**
+   laufen lassen. Die Automation `Bienen: Messintervall nach Saison` dabei
+   ausschalten, sonst überschreibt sie das Intervall nachts um 3 Uhr.
+3. "Rohwert" gegen "Temperatur" auftragen und eine Gerade durchlegen —
+   **mit einem Zeitglied als zweitem Term**. Ohne das schiebt das Kriechen der
+   Zellen den Koeffizienten nach oben (im 2-Tage-Datensatz vom 03.08. um
+   5 g/K, im 7-Tage-Datensatz um knapp 5 g/K).
+4. Steigung in g/K in die Number eintragen. Kontrolle: "Temperaturkorrektur"
+   muss sich über den Tag sichtbar bewegen, das Gewicht bei konstanter Last
+   dagegen nicht mehr.
+
+Ein Tag reicht dafür nicht. Über einen einzelnen Tag sind Temperatur- und
+Zeitanteil nicht zu trennen; die Tageswerte der Messreihe an "Waage eG"
+streuten zwischen 23 und 35 g/K, über die volle Woche kamen 32,5 ± 0,7 heraus.
+
+### Was die Kompensation nicht kann
+
+Sie korrigiert die **gemeinsame** Temperatur aller vier Zellen. Steht die Waage
+in der Sonne und wird eine Ecke deutlich wärmer als die anderen, entsteht ein
+Fehler, den ein einzelner Sensor prinzipiell nicht sehen kann. Dass das hier
+klein ist, war die Bedingung für den Einbau und wurde geprüft: Erwärmung und
+Abkühlung liefern denselben Zusammenhang (Hysterese ±1,4 g). **Nach dem Umzug
+in den Garten ist das erneut zu prüfen** — dort ist genau diese Voraussetzung
+am ehesten verletzt.
+
+Ebenfalls nicht korrigiert wird das **Kriechen** der Zellen nach einem
+Lastwechsel. In der Messreihe steckt ein davon herrührender Anteil von
+−10,9 g/Tag, der mit der Temperatur nichts zu tun hat.
+
+**Die Variante ohne alles:** Gewicht immer zur selben Uhrzeit vergleichen, am
+besten vor Sonnenaufgang. Das kürzt den Tagesgang ohnehin weitgehend heraus.
+Der Helfer "Waage Tagesbilanz" (`statistics`/`change`/24 h) macht genau das
+und funktioniert mit und ohne Kompensation.
 
 ## Fehlersuche: die Waage misst Unsinn
 
@@ -333,13 +418,18 @@ Drei Diagnose-Entities beantworten die Frage, wo es klemmt. Sie stehen in HA
 unter "Diagnose" und werden bei jeder Messung aktualisiert.
 
 **1. "Waage eG Kalibrierfaktor"** — der wichtigste Wert. An diesem Aufbau
-gemessen: **−17.900 counts/kg**.
+gemessen: **−20.874 counts/kg** (Stand 10.08.2026).
+
+> Frühere Kalibrierungen dieses Aufbaus ergaben −17.900 und −20.840. Die
+> Streuung kommt von der Kalibrierung selbst, nicht von der Hardware; der
+> Erwartungsbereich für die Fehlersuche ist deshalb **−18.000 bis −21.000**.
 
 | Anzeige | Bedeutung |
 |---|---|
 | **exakt 3.500** | Eindeutig: die Kalibrierung ist auf die Platzhalter zurückgefallen. Neu kalibrieren. |
 | sehr groß (>100.000) | Beim Kalibrieren war der Span zu klein — Gewicht lag nicht auf, oder es wurde nicht ~1 min gewartet. Neu kalibrieren. |
-| ~±17.900 | Die Umrechnung ist in Ordnung, weiter bei Punkt 2. |
+| ~±18.000 bis ±21.000 | Die Umrechnung ist in Ordnung, weiter bei Punkt 2. |
+| rund die **Hälfte** des Erwartungswerts | Nur „Kalibrieren Referenzgewicht" gedrückt, der Nullpunkt fehlt. Erkennbar auch an leerem „Kalibriert bei". Beide Schritte fahren. |
 
 Der Wert **3.500** ist die schärfste Diagnose, weil er sich exakt aus den
 Platzhaltern ergibt (1750 counts / 0,5 kg) und mit keiner realen Kalibrierung
@@ -360,6 +450,11 @@ Der verräterische Hinweis steht in **„Kalibriert bei": unbekannt.** Die
 Temperatur wird ausschließlich beim Nullpunkt gespeichert — steht dort nichts,
 wurde „Kalibrieren 0 kg" nie ausgeführt.
 
+**Zweite Folge davon:** Ohne „Kalibriert bei" fehlt der Bezugspunkt der
+Temperaturkompensation, und die schaltet sich ab. Zu erkennen an
+„Temperaturkorrektur": steht die dauerhaft auf 0,000, obwohl ein Koeffizient
+eingetragen ist, fehlt der Nullpunkt.
+
 ### Warum der Faktor negativ ist — und warum das in Ordnung ist
 
 Ein **negatives** Vorzeichen heißt nur: mehr Last erzeugt einen *kleineren*
@@ -377,11 +472,12 @@ Rohwert nach *unten* zieht, ist die Frage, wie weit es bis zum unteren
 Anschlag (−8.388.608) noch ist. Schau in "Waage eG Rohwert" bei leerer Waage:
 
 ```
-verbleibende Kapazität in kg = (Rohwert + 8.388.608) / 17.900
+verbleibende Kapazität in kg = (Rohwert + 8.388.608) / 20.874
 ```
 
-Bei einem Rohwert von z. B. +600.000 sind das rund 500 kg Vorrat — völlig
-unkritisch. Läge der Rohwert dagegen schon tief im Negativen, könnte ein voller
+Bei einem Rohwert von z. B. +600.000 sind das rund 430 kg Vorrat — völlig
+unkritisch; die real gemessenen ~26.700 counts bei leerer Waage ergeben rund
+400 kg, das mechanische Limit von 200 kg greift also lange vorher. Läge der Rohwert dagegen schon tief im Negativen, könnte ein voller
 Stock den Wandler in die Sättigung fahren; dann A+/A− tauschen und neu
 kalibrieren.
 
@@ -426,6 +522,14 @@ esphome config waage-stock3.yaml
 
 Geprüft gegen ESPHome 2026.6.5 - siehe Abschnitt "Validierung" in den
 Projektnotizen.
+
+Die Rechnung der Temperaturkompensation lässt sich zusätzlich ohne Hardware
+und ohne ESPHome prüfen - das Programm bindet die echte Header-Datei ein:
+
+```bash
+cd tests
+g++ -std=c++17 -Wall -Wextra -O2 waage-temperatur-test.cpp -o test && ./test
+```
 
 Bei der Umstellung auf packages wurde die aufgelöste Konfiguration von
 `waage-eg` vorher und nachher verglichen: identisch bis auf den zusätzlichen

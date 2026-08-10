@@ -17,7 +17,18 @@ HA-Seite (7 Helfer, 4 Automationen, 3-Ansichten-Dashboard) ist eingerichtet. Es 
 sich jetzt um Feinschliff, offene Messungen und mögliche Erweiterungen — nicht mehr um
 einen Neuaufbau von Null.
 
-**Repo:** `github.com/Moppelpuck-JeFa/Bienenstockwaage` (privat), Branch `main`.
+**Repo:** `github.com/Moppelpuck-JeFa/Bienenstockwaage` (privat). **Stand: 10.08.2026.**
+Die Temperaturkompensation liegt auf dem Branch
+`claude/temperature-compensation-0l9ztn` und ist geflasht und aktiv, aber noch
+nicht nach `main` gemerged.
+
+**Chronologie in den Sessionberichten** — bei "warum ist das so?" zuerst dort nachsehen:
+
+| Datum | Thema |
+|---|---|
+| [03.08.](docs/sessionbericht-2026-08-03.md) | Temperaturdrift erstmals ausgewertet, Deep-Sleep-Vorbereitung, Durchsichtmodus, Kalibrierungsverlust |
+| [04.08.](docs/sessionbericht-2026-08-04.md) | Umstellung auf substitutions/packages, Namensschema |
+| [10.08.](docs/sessionbericht-2026-08-10.md) | Temperaturkompensation eingebaut, Schwarm-Alarm gesperrt |
 
 **Wichtig:** Workflow-Sprache ist Deutsch — Code-Kommentare, YAML-Labels, Entity-Namen
 und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
@@ -35,11 +46,19 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
 | Durchsicht-Taster | `D2` (GPIO4) gegen GND, interner Pull-up |
 | Durchsicht-LED | `D7` (GPIO13) gegen GND, 1 kΩ Vorwiderstand |
 
-**Gemessene Istwerte:**
-- Kalibrierfaktor: **−20.840 counts/kg** (negativ = invertierte Signalpolarität, funktional unkritisch)
-- Kalibriert mit 2,218 kg Referenzgewicht bei 21,5 °C
-- Rohwert leer: 25.830 counts → ~470 kg rechnerischer ADC-Vorrat (mechanisches Limit von 200 kg greift vorher)
-- WLAN-Signal: −70 dBm (Grenzbereich, ggf. beobachten)
+**Gemessene Istwerte (Stand 10.08.2026, nach der Neukalibrierung um 15:01/15:03):**
+- Kalibrierfaktor: **−20.874 counts/kg** (negativ = invertierte Signalpolarität, funktional unkritisch)
+- Kalibriert mit 2,218 kg Referenzgewicht, "Kalibriert bei" **25,8 °C**
+- Temperaturkoeffizient: **+32,5 g/K**
+- Rohwert leer: ~26.700 counts → rund 400 kg rechnerischer ADC-Vorrat (mechanisches Limit von 200 kg greift vorher)
+- WLAN-Signal: −74 bis −76 dBm (Grenzbereich, beobachten)
+
+> **Der Kalibrierfaktor streut über die Kalibrierungen hinweg** — dieser Aufbau
+> lieferte nacheinander −17.900, −20.840 und jetzt −20.874. Das ist die
+> Kalibrierung, nicht die Hardware. Für die Fehlersuche gilt deshalb ein
+> **Erwartungsbereich von −18.000 bis −21.000**, nicht ein fester Wert. Wo in
+> README und Notizen noch ältere Zahlen stehen, sind sie ausdrücklich als
+> historisch gekennzeichnet.
 
 ---
 
@@ -66,16 +85,33 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   Number-Entity `Messintervall`. Sichtbare Sensoren stehen auf `update_interval: never`.
 - Filterkette: `median` (5 Werte) → `sliding_window_moving_average` (12 × 5 s ≈ 60 s).
 - Minutenzähler statt `millis()`, weil `millis()` nach ~49 Tagen überläuft.
+- **Der Minutenzähler wird zurückgesetzt von: jedem Neustart, "Jetzt messen", einer
+  Änderung des Messintervalls und dem Ende des Durchsicht-Nachlaufs.** Das sieht
+  in HA leicht nach "die Waage aktualisiert nicht mehr" aus — bei 60 min Intervall
+  und ein paar Neustarts hintereinander kommt schlicht lange kein planmäßiger Wert.
+  Am 10.08. genau so aufgetreten und als Fehlalarm entlarvt: erste planmäßige
+  Messung um 16:04:06, exakt 3600 s nach dem letzten Reset. **Zum Prüfen die
+  Betriebszeit ansehen, nicht die Uhr** — sie wird zusammen mit dem Gewicht
+  veröffentlicht, ihr Zeitstempel ist also der Zeitpunkt der letzten Messung.
+- Seit der Temperaturkompensation wartet der Taktgeber nach einem Neustart bis zu
+  3 min auf den ersten Temperaturwert, bevor er den ersten Wert nach HA schickt
+  (nur wenn die Kompensation aktiv ist). Ein defekter DS18B20 kostet damit
+  3 Minuten, legt die Waage aber nicht still.
 
 ### Kritische Plattform-Fallstricke (ESP8266 / ESPHome)
 - **`restore_from_flash: true` ist ZWINGEND.** Ohne diese Zeile landen alle
   `restore_value`-Globals nur im RTC-RAM → gehen bei jedem Stromausfall verloren,
   Kalibrierung fällt auf Platzhalter zurück. War Ursache eines realen Fehlerbilds.
 - **Aber es schuetzt NICHT gegen einen Flash, der neue `globals` hinzufuegt.**
-  Am 03.08. real passiert: Faktor fiel unmittelbar nach dem Flash auf den
-  Platzhalter 3.500. **Nach jedem Flash den Kalibrierfaktor pruefen** und im
-  Zweifel BEIDE Kalibrierschritte fahren — nur den Referenzpunkt zu setzen
-  ergibt einen etwa halbierten Faktor bei plausibel aussehender Anzeige.
+  Zweimal real passiert: am 03.08. (Faktor fiel auf den Platzhalter 3.500) und
+  am 10.08. beim Flash der Temperaturkompensation, die das Global
+  `letzte_temperatur` mitbrachte. **Das ist die Regel, nicht die Ausnahme —
+  ein Flash mit neuem Global kostet die Kalibrierung.** Nach jedem Flash den
+  Kalibrierfaktor pruefen und im Zweifel BEIDE Kalibrierschritte fahren; nur den
+  Referenzpunkt zu setzen ergibt einen etwa halbierten Faktor bei plausibel
+  aussehender Anzeige. Erkennungszeichen dafuer: "Kalibriert bei" ist leer.
+  Seit der Kompensation haengt daran mehr als frueher — ohne "Kalibriert bei"
+  fehlt der Bezugspunkt und die Kompensation schaltet sich stumm ab.
 - **GPIO16 (D0) ist der einzige Deep-Sleep-Weckpin** des ESP8266 (RTC-Timer zieht
   ihn auf Masse, muss deshalb an RST liegen). DOUT lag ursprünglich dort und hat
   Batteriebetrieb blockiert; **inzwischen auf D6 (GPIO12) umgezogen**, GPIO16 ist
@@ -88,13 +124,41 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   darstellbar ist).
 - Elektrisch unkritisch (0,1 kg ≈ 1.800 counts vs. ~21 counts HX711-Rauschen).
 - **Begrenzend ist die Mechanik**, nicht der ADC: Eckenfehler ohne getrimmte Junction-Box
-  0,5–2 % (250 g – 1 kg bei 50 kg), Temperaturdrift, Kriechen.
+  0,5–2 % (250 g – 1 kg bei 50 kg), Kriechen. Die Temperaturdrift war der größte
+  Posten und wird seit dem 10.08.2026 herausgerechnet.
 
-### Temperatur
-- DS18B20 **misst**, es wird **nicht kompensiert** — Koeffizient ist unbekannt, ein
-  geratener Koeffizient würde die Messung unbemerkt verschlechtern.
-- `calib_temp` wird bei Nullpunkt-Kalibrierung mitgespeichert (nicht nachträglich
-  rekonstruierbar).
+### Temperatur — wird kompensiert (seit 10.08.2026)
+- **+32,5 g/K**, gemessen über 6,8 Tage und 9,4 K (164 Punkte). Herleitung:
+  [`docs/sessionbericht-2026-08-10.md`](docs/sessionbericht-2026-08-10.md).
+- Gerechnet wird `kg -= (Temperatur − calib_temp) × Koeffizient`, danach erst Tara.
+  `calib_temp` ist die bei der Nullpunkt-Kalibrierung festgehaltene Temperatur
+  ("Kalibriert bei"), dort ist die Korrektur null. Fehlt sie, wird **nicht**
+  kompensiert.
+- Die Formel steht **einmal**, in `packages/waage-temperatur.h` (über
+  `esphome: includes:`), weil sie an drei Stellen gebraucht wird: Gewicht, Tara,
+  Diagnose-Entity. Pfad dort muss `packages/…` lauten — er löst gegen das
+  Verzeichnis der geflashten Stock-Datei auf.
+- **Tara zieht die Korrektur mit ab.** Sonst wandert die Drift nach dem Tarieren
+  wieder ins Gewicht zurück. Klassischer Fehler, fällt beim Ausprobieren nicht auf.
+- Koeffizient ist eine **Number-Entity** (g/K, `0` = aus), nicht fest im YAML:
+  er ist eine Messgröße und muss am Zielstandort neu bestimmt werden — und jeder
+  Flash kann die Kalibrierung mitnehmen.
+- **Der Rohwert bleibt unkompensiert**, sonst wäre er für eine Nachmessung wertlos.
+- Neue Stöcke starten mit `0`. Der Wert von waage-eg gilt nur für dessen Aufbau.
+- Nicht kompensiert: Kriechen (−10,9 g/Tag, abklingend) und Gradienten zwischen den
+  vier Zellen (kann ein einzelner Sensor prinzipiell nicht).
+- Prüfprogramm ohne Hardware: `tests/waage-temperatur-test.cpp` (`g++`, 4028 Prüfungen).
+  Bindet die echte Header-Datei ein, prüft also den ausgelieferten Code. Wer die
+  Lambdas in `waage-basis.yaml` ändert, muss den Nachbau dort mitziehen.
+- **Reserve, bewusst nicht eingebaut:** Glättet man die Temperatur vor der
+  Verrechnung mit τ ≈ 90 min, fällt die Reststreuung von 15 g auf 8 g. Nicht
+  gemacht, weil die Firmware mit dem *momentanen* Sensorwert rechnet — dazu
+  gehören die 32,5 g/K, nicht die 34,7 aus dem gefilterten Fit — und weil τ an
+  der thermischen Masse des Aufbaus hängt und im Garten anders ausfällt.
+- **Belastbarkeit:** ±0,7 g/K ist nur der statistische Fehler. Teilmengen der
+  Messreihe lagen zwischen 28 und 35 g/K, Einzeltage zwischen 23 und 35.
+  Realistisch ist ±3 g/K. Über 20 K Tagesgang also ±60 g Restfehler statt 650 g
+  unkompensiert.
 
 ### Durchsichtmodus
 - Hardware-Taster am Stock sperrt die **Veroeffentlichung** (nicht die Messung)
@@ -105,11 +169,12 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   den Modus. Ein unbemerkt haengender Durchsichtmodus waere schlimmer.
 - **2 min Nachlauf** nach dem Ende, damit das 60-s-Mittelungsfenster die
   Manipulation ausspuelt, danach sofort ein Wert (nicht erst nach dem Intervall).
-- **Offener Punkt auf der HA-Seite:** Nach der Durchsicht springt das Gewicht in
-  einem Schritt. Der 20-min-Ableitungshelfer liest das als Absturz →
-  `Bienen: Schwarm-Alarm` loest faelschlich aus. Die Automation braucht
-  `switch.waage_eg_durchsichtmodus` == off `for: 00:30:00` als Bedingung
-  (laenger als das Ableitungsfenster). Noch nicht eingebaut.
+- **HA-Seite erledigt (10.08.2026):** Nach der Durchsicht springt das Gewicht in
+  einem Schritt, der 20-min-Ableitungshelfer liest das als Absturz.
+  `Bienen: Schwarm-Alarm` hat jetzt drei Sperren (je 30 min, laenger als das
+  Ableitungsfenster): Durchsichtmodus off `for: 00:30:00`, Betriebszeit > 1800,
+  und ein Template auf `last_changed` von Kalibrierfaktor/Kalibriert bei/den
+  drei Buttons. Details im README, Abschnitt "Durchsichtmodus".
 
 ### Namensgebung
 - Entity-Namen **ohne** `"Waage eG "`-Präfix im YAML, weil ESPHome den `friendly_name`
@@ -130,6 +195,28 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   (Gewicht minus Leergewicht Beute) ist nur die Anzeige; die Kritisch-Prüfung selbst
   vergleicht direkt das Rohgewicht gegen `input_number.mindestgewicht_mit_futter`
   (beide auf derselben Basis: Gesamtgewicht inkl. Beute).
+- **`Bienen: Schwarm-Alarm` hat drei Sperren** (seit 10.08.2026), zusätzlich zum
+  Zeitfenster 9–18 Uhr. Alle drei sperren **30 min** — länger als das
+  20-min-Ableitungsfenster, sonst steckt der Sprung beim Freigeben noch darin:
+
+  | Sperre | Bedingung | Fängt ab |
+  |---|---|---|
+  | Durchsicht | `switch.waage_eg_durchsichtmodus` = off `for: 00:30:00` | Durchsicht, Honigernte |
+  | Neustart | `sensor.waage_eg_betriebszeit` above 1800 | Neustart, vor allem der Flash mit Kalibrierungsverlust |
+  | Kalibrierung | Template auf `last_changed` | Kalibrieren, Tarieren |
+
+  **Grund für die Erweiterung:** Der ursprünglich geplante Durchsicht-Filter
+  allein hätte den realen Fehlalarm vom 10.08. um 15:04 **nicht** verhindert —
+  der Durchsichtmodus war aus, Auslöser war eine Neukalibrierung (−3,3 kg/h bei
+  Schwelle −3). Die Kalibrier-Sperre prüft deshalb `last_changed` von
+  `Kalibrierfaktor`, `Kalibriert bei` und den drei Buttons. Für
+  "hat sich lange nicht geändert" gibt es keine native HA-Bedingung: `state` mit
+  `for:` braucht einen festen Zielzustand, der Zustand eines Buttons *ist* aber
+  der Zeitstempel des letzten Drucks. Der Best-Practice-Prüfer des MCP-Servers
+  meldet das Template deshalb an — begründet abgewiesen, Begründung als `note:`
+  in der Automation. Verbleibende Lücke: ein Tara über die ESPHome-Weboberfläche.
+- Dieselbe Sperre fehlt noch bei `Bienen: Futtervorrat kritisch` (weniger
+  dringend: Schwellwert löst erst nach 2 h Überschreitung aus).
 
 ---
 
@@ -177,6 +264,31 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   — für aktuelle Sensorwerte stattdessen `ha_search` mit Gerätename nutzen.
 - `ha_get_device(integration: esphome)` liefert leer, wenn Geräte über MQTT statt der
   ESPHome-HA-Integration verbunden sind → dann `integration: mqtt` verwenden.
+- **Buttons, die über die ESPHome-Weboberfläche (Port 80) gedrückt werden,
+  erreichen HA nicht.** Das Gerät führt `on_press` aus und veröffentlicht, aber
+  die Button-Entity in HA behält ihren alten Zeitstempel. Am 10.08. zunächst als
+  rätselhafte "Messung außerhalb des Takts" aufgefallen. Zwei Konsequenzen: bei
+  der Fehlersuche nie aus einer unveränderten Button-Entity schließen, dass
+  nichts gedrückt wurde — und Automationen, die auf Kalibrierung reagieren
+  sollen, an die Diagnose-Sensoren hängen (`Kalibrierfaktor`, `Kalibriert bei`),
+  nicht an die Buttons. Die Sensoren ändern sich unabhängig davon, woher der
+  Druck kam.
+- **`esphome: includes:` prüft den Pfad schon bei `esphome config`.** Steht dort
+  `waage-temperatur.h` statt `packages/waage-temperatur.h`, bricht die
+  Validierung mit Exit-Code 2 ab. Der Pfad löst gegen das Verzeichnis der
+  geflashten Stock-Datei auf — genauso wie `!secret` und das `!include` des
+  Packages.
+- **Messdaten für eine Driftanalyse aus dem Recorder holen:** Rohwert als
+  Zustandsverlauf (`ha_get_history`, source `history`), Temperatur als
+  Stundenmittel (source `statistics`, period `hour`) — für die Temperatur reicht
+  das Stundenmittel, der Zeitversatz von einer halben Stunde kostet bei einem
+  24-h-Tagesgang nur 0,1 %. **Wiederholungen filtern:** nach jedem `unavailable`
+  veröffentlicht HA denselben Wert erneut mit neuem Zeitstempel; ungefiltert
+  waren das im 7-Tage-Datensatz 20 Scheinmesspunkte, alle rund um Neustarts
+  gehäuft. Doppelte Werte verwerfen.
+- `ha_eval_template` eignet sich, um eine Template-Bedingung **vor** dem
+  Schreiben gegen die echten Entities zu testen — inklusive der Frage, was bei
+  einer fehlenden Entity passiert.
 
 ---
 
@@ -184,8 +296,13 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
 
 ```
 Bienenstockwaage/
+├── CLAUDE.md                          # Kurzanleitung fuer Claude Code, wird
+│                                       #   automatisch geladen. Zeigt hierher.
 ├── packages/waage-basis.yaml          # GESAMTE gemeinsame Logik - die eigentliche
 │                                       #   Codedatei. Wird nicht direkt geflasht.
+├── packages/waage-temperatur.h        # Formel der Temperaturkompensation, einmal
+│                                       #   statt dreimal (esphome: includes:)
+├── tests/waage-temperatur-test.cpp    # Prueft ebendiese Formel mit g++, ohne Hardware
 ├── waage-eg.yaml                      # Stock 1: nur substitutions + package-Include
 ├── waage-stock2.yaml                  # Stock 2, dito
 ├── waage-stock3.yaml                  # Stock 3, dito
@@ -194,6 +311,7 @@ Bienenstockwaage/
 ├── waage-eg-notes.md                  # Entscheidungen, Begründungen, HA-Seite
 ├── docs/waegezellen-verkabelung.md    # Abschnitt 0 = Halbbrücken-Ring (relevant),
 │                                       #   Abschnitte 1-6 = Vollbrücken-Referenz
+├── docs/sessionbericht-*.md           # Was wann warum geaendert wurde
 ├── README.md                          # Inbetriebnahme, Kalibrieren, Fehlersuche
 └── .gitignore                         # secrets.yaml, .esphome/, *.bin
 ```
@@ -224,11 +342,23 @@ zusätzlichen `substitutions:`-Block.
 
 **Nicht im Repo (lebt nur in HA):** Helfer, Automationen, Dashboard `bienen-stockwaage`.
 
-Die vollständigen YAML-Codefragmente (Globals, HX711-Sensor, Kalibrier-Button, Taktgeber)
-sowie die Tabellen der HA-Helfer und -Automationen liegen in den Originaldateien
-`claude_waage-eg-kontext.md` bzw. `Leergewicht__mindestgewicht_mit_Futter` — diese
-sollten 1:1 als Referenz mit ins neue Arbeitsverzeichnis übernommen werden, da hier nur
-die Entscheidungen zusammengefasst sind, nicht jede Codezeile.
+**Wo der eigentliche Code steht:** Diese Datei fasst nur Entscheidungen zusammen.
+Die vollständige Logik (Globals, HX711 samt Filterkette, Kalibrier-Buttons,
+Wägezellen-Template, Durchsichtmodus, Taktgeber) steht in
+`packages/waage-basis.yaml` — 800+ Zeilen mit ausführlichen Kommentaren, die das
+Warum jeweils an Ort und Stelle erklären. Die Tabellen der HA-Helfer und
+-Automationen stehen in `waage-eg-notes.md`, Abschnitt "Home-Assistant-Seite".
+
+*(Frühere Fassungen dieser Datei verwiesen auf `claude_waage-eg-kontext.md` und
+`Leergewicht__mindestgewicht_mit_Futter` als Referenzdateien. Die gibt es im Repo
+nicht — der Inhalt ist längst in die oben genannten Dateien eingeflossen.)*
+
+**Prüfen ohne Hardware:**
+
+```bash
+esphome config waage-eg.yaml            # loest Packages/Substitutions/Secrets auf
+cd tests && g++ -std=c++17 -Wall -Wextra -O2 waage-temperatur-test.cpp -o test && ./test
+```
 
 ---
 
@@ -266,28 +396,33 @@ Gegenprobe mit Ohmmeter: E+/E− und A+/A− müssen etwa gleich sein (~1 kΩ).
 - Details: [`docs/sessionbericht-2026-08-04.md`](docs/sessionbericht-2026-08-04.md)
 
 **Sofort anzupassen (Platzhalter):**
-- **NEU KALIBRIEREN, beide Schritte.** Beim Flash am 03.08. ging die
-  Kalibrierung verloren (Faktor fiel auf den Platzhalter 3.500); die
-  anschliessende Neukalibrierung setzte nur den Referenzpunkt, nicht den
-  Nullpunkt. Der Faktor steht dadurch bei −8.770 statt −20.840 und die Waage
-  misst falsch. Erkennungszeichen: "Kalibriert bei" ist leer.
-  Details in [`docs/sessionbericht-2026-08-03.md`](docs/sessionbericht-2026-08-03.md).
-- **Schwarm-Alarm gegen den Durchsichtmodus sperren** — sonst loest er nach
-  jeder Durchsicht aus, bei der Gewicht abgenommen wurde. Bedingung siehe
-  Abschnitt "Durchsichtmodus".
+- ~~**NEU KALIBRIEREN, beide Schritte.**~~ **Zweimal erledigt** — am 03.08. um
+  16:36/16:41 (Faktor −20.845, 24,6 °C) und erneut am 10.08. um 15:01/15:03,
+  nachdem der Flash der Temperaturkompensation die Kalibrierung wieder gekostet
+  hatte. **Aktuell gültig: −20.874 counts/kg, "Kalibriert bei" 25,8 °C,
+  "Kalibriert mit" 2,218 kg.** Der Ablauf des ersten Verlusts (Faktor auf dem
+  Platzhalter 3.500, dann eine halbe Neukalibrierung mit −8.770) steht in
+  [`docs/sessionbericht-2026-08-03.md`](docs/sessionbericht-2026-08-03.md).
+  **Nach jedem Flash den Kalibrierfaktor prüfen** — das bleibt dauerhaft gültig,
+  siehe den Fallstrick zu `restore_from_flash` in Abschnitt 3.
+- ~~**Schwarm-Alarm gegen den Durchsichtmodus sperren**~~ — **erledigt am
+  10.08.2026**, und gleich gegen Neustart und Kalibrierung mit. Siehe Abschnitt
+  "Durchsichtmodus". Offen bleibt dasselbe fuer `Bienen: Futtervorrat kritisch`
+  (weniger dringend, Schwellwert loest erst nach 2 h aus).
 - `input_number.leergewicht_beute` und `input_number.mindestgewicht_mit_futter` stehen
   beide noch auf 0,0 kg. Reale Werte eintragen (Beute leer wiegen; Mindestgewicht =
   Beute + Bienen + Mindestfutterreserve). Bis dahin liefert `binary_sensor.futtervorrat_kritisch`
   fälschlich "nicht kritisch".
 - Schwarm-Schwellwert von −3 kg/h nach der ersten echten Saison nachjustieren.
 
-**Offene Messung:**
-- Temperaturdrift bestimmen: konstante bekannte Last auflegen, Messintervall auf 15 min,
-  einige Tage laufen lassen, dann Rohwert gegen Temperatur in der Dashboard-Ansicht
-  "Auswertung" vergleichen.
-  - Parallele Kurven → systematische Drift, Kompensation würde sich lohnen.
-  - Breit streuende Punktwolke → Eckengradienten dominieren, ein einzelner Sensor kann
-    das nicht korrigieren → dann auf Tagesbilanz verlassen.
+**Temperaturdrift — erledigt, aber am Zielstandort zu wiederholen:**
+- Ergebnis: +32,5 g/K, Hysterese ±1,4 g (also keine dominierenden Eckengradienten),
+  Kompensation eingebaut und aktiv.
+- **Nach dem Umzug in den Garten neu bestimmen.** Vorgehen: konstante Last auflegen,
+  Messintervall auf 15–60 min, `Bienen: Messintervall nach Saison` vorübergehend
+  ausschalten, mindestens fünf Tage laufen lassen, dann Rohwert gegen Temperatur
+  fitten — **mit einem Zeitglied als zweitem Term**, sonst schiebt das Kriechen den
+  Koeffizienten nach oben. Einzeltage taugen nicht (streuten zwischen 23 und 35 g/K).
 
 **Deep Sleep / Batteriebetrieb (Zielaufbau: Garten, Solar, NiMH 2600 mAh):**
 - Der Pin-Blocker ist beseitigt: DOUT liegt jetzt auf D6 (GPIO12), GPIO16 bleibt
@@ -306,24 +441,43 @@ Gegenprobe mit Ohmmeter: E+/E− und A+/A− müssen etwa gleich sein (~1 kΩ).
   Parallelschaltung.
 - WLAN-Pegel −70 dBm beobachten, ggf. Antennenposition prüfen.
 
-**Aus früheren Sessions noch offen:**
-- Frage zur `secrets.yaml`-Nutzung in ESPHome war zuletzt noch nicht abschließend geklärt.
+**Erledigt, hier nur noch als Antwort auf wiederkehrende Fragen:**
+- **`secrets.yaml`-Nutzung** (war lange offen, seit 04.08. geklärt): Die Datei
+  bleibt neben den Stock-Dateien im Root (`/config/esphome/secrets.yaml`), nicht
+  in `packages/` — `!secret` in einem Package löst gegen das Verzeichnis der
+  geflashten Datei auf. Secret-Namen lassen sich **nicht** über Substitutions
+  parametrisieren (`!secret ${x}` geht nicht); deshalb teilen sich alle Stöcke
+  standardmäßig WLAN, API-Key und OTA-Passwort. Wer pro Gerät trennen will,
+  überschreibt den `api:`-Block in der Stock-Datei — in `waage-stock2/3.yaml`
+  ist das auskommentiert vorbereitet.
 
 ---
 
-## 8. Vorschlag: Einstiegs-Prompt für Claude Code
+## 8. Einstiegs-Prompt für Claude Code
 
-Kopiere diesen Block als ersten Prompt in Claude Code, nachdem du das Repo geklont hast:
+**Seit dem 10.08.2026 liegt eine [`CLAUDE.md`](CLAUDE.md) im Root.** Claude Code
+lädt sie bei jeder Session automatisch — Prüfbefehle, Architektur, harte Regeln
+und ein Verweis auf diese Datei hier sind damit immer im Kontext. Für die
+meisten Aufgaben reicht es also, einfach loszulegen.
+
+Der Block unten bleibt trotzdem nützlich: für andere Werkzeuge ohne
+CLAUDE.md-Unterstützung, und wenn du diese Datei ausdrücklich vollständig
+gelesen haben willst (die CLAUDE.md verweist nur darauf, sie enthält sie nicht).
 
 ```
 Ich arbeite an einer ESPHome-Bienenstockwaage (ESP8266 D1 Mini + HX711), die bereits
 produktiv läuft und in Home Assistant eingebunden ist. Im Repo-Root liegt die Datei
 waage-eg-claude-code-kontext.md mit der vollständigen Zusammenfassung aller bisherigen
 Entscheidungen, Fallstricke und offenen Punkte — bitte lies sie zuerst komplett.
+Die Sessionberichte in docs/ sind die Chronologie dazu; wenn dir eine Entscheidung
+unbegründet vorkommt, steht das Warum meist dort.
 
-Aktuell will ich als Nächstes: [HIER EINTRAGEN, z. B. "die Temperaturdrift-Messung
-auswerten" oder "input_number.leergewicht_beute korrekt setzen" oder "die
-secrets.yaml-Frage klären"].
+Prüfen lässt sich alles ohne Hardware: "pip install esphome" und
+"esphome config waage-eg.yaml", plus das g++-Testprogramm in tests/.
+
+Aktuell will ich als Nächstes: [HIER EINTRAGEN, z. B. "den Schwarm-Alarm gegen den
+Durchsichtmodus sperren" oder "input_number.leergewicht_beute korrekt setzen" oder
+"die neuen Stöcke benennen und die HA-Seite dafür anlegen"].
 
 Bitte halte dich an die dort dokumentierten Konventionen (deutsche Sprache in Code/
 Doku, keine calibrate_linear-Kalibrierung, restore_from_flash: true nicht entfernen,
