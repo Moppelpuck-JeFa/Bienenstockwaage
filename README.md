@@ -291,25 +291,40 @@ Ein Neustart beendet den Modus. Das ist Absicht: eine Waage, die nach einem
 Stromausfall still im Durchsichtmodus hängt und wochenlang nichts mehr sendet,
 wäre schlimmer als einmal zu viel drücken.
 
-### Wichtig: der Schwarm-Alarm braucht eine Sperre
+### Der Schwarm-Alarm ist gegen Fehlauslöser gesperrt
 
 Nach der Durchsicht springt das Gewicht in einem Schritt auf den neuen Wert.
 Der Helfer für die Schwarm-Erkennung (Ableitung über 20 min in kg/h) sieht
 diesen Sprung als rasanten Gewichtsverlust — hast du eine Honigzarge
-abgenommen, **löst der Schwarm-Alarm zuverlässig fälschlich aus**.
+abgenommen, sähe das für ihn aus wie ein abgegangener Schwarm.
 
-Die Automation `Bienen: Schwarm-Alarm` braucht deshalb eine zusätzliche
-Bedingung. Die Sperre muss länger sein als das Ableitungsfenster von 20 min:
+Dasselbe gilt für **jeden** Sprung, der nicht vom Stock kommt. Am 10.08.2026
+hat der Alarm nach einer Neukalibrierung fehlausgelöst (−3,3 kg/h). Die
+Automation `Bienen: Schwarm-Alarm` hat deshalb seitdem **drei Sperren**
+zusätzlich zum Zeitfenster 9–18 Uhr:
 
-```yaml
-condition:
-  - condition: state
-    entity_id: switch.waage_eg_durchsichtmodus
-    state: "off"
-    for: "00:30:00"
-```
+| Sperre | Fängt ab |
+|---|---|
+| `switch.waage_eg_durchsichtmodus` = off `for: 00:30:00` | Durchsicht, Honigernte |
+| `sensor.waage_eg_betriebszeit` > 1800 | Neustart der Waage — vor allem den Fall, dass ein Flash die Kalibrierung verliert |
+| Template: 30 min seit letzter Kalibrierung/Tara | Kalibrieren, Tarieren |
 
-Dasselbe gilt sinngemäß für `Bienen: Futtervorrat kritisch`.
+**Alle drei sind 30 min lang, nicht 20** — die Sperre muss länger halten als
+das Ableitungsfenster, sonst steckt der Sprung beim Freigeben noch darin.
+
+Die dritte Sperre prüft `last_changed` von „Kalibrierfaktor", „Kalibriert bei"
+und den drei Buttons. Die Diagnose-Sensoren sind dabei die wichtigeren: Wird
+ein Button über die **ESPHome-Weboberfläche** statt über HA gedrückt, sieht HA
+den Druck nicht — die Sensoren ändern sich trotzdem. Einzige verbleibende
+Lücke ist ein Tara über die Weboberfläche.
+
+Warum dafür ein Template und nichts Natives: Eine `state`-Bedingung mit `for:`
+braucht einen festen Zielzustand. Der Zustand eines Buttons *ist* aber der
+Zeitstempel des letzten Drucks. Für „hat sich lange nicht geändert" gibt es in
+HA keine native Bedingung.
+
+Sinngemäß dasselbe fehlt noch für `Bienen: Futtervorrat kritisch` — dort ist es
+weniger dringend, weil der Schwellwert erst nach 2 h Überschreitung auslöst.
 
 ## Temperaturkompensation
 

@@ -122,11 +122,12 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   den Modus. Ein unbemerkt haengender Durchsichtmodus waere schlimmer.
 - **2 min Nachlauf** nach dem Ende, damit das 60-s-Mittelungsfenster die
   Manipulation ausspuelt, danach sofort ein Wert (nicht erst nach dem Intervall).
-- **Offener Punkt auf der HA-Seite:** Nach der Durchsicht springt das Gewicht in
-  einem Schritt. Der 20-min-Ableitungshelfer liest das als Absturz →
-  `Bienen: Schwarm-Alarm` loest faelschlich aus. Die Automation braucht
-  `switch.waage_eg_durchsichtmodus` == off `for: 00:30:00` als Bedingung
-  (laenger als das Ableitungsfenster). Noch nicht eingebaut.
+- **HA-Seite erledigt (10.08.2026):** Nach der Durchsicht springt das Gewicht in
+  einem Schritt, der 20-min-Ableitungshelfer liest das als Absturz.
+  `Bienen: Schwarm-Alarm` hat jetzt drei Sperren (je 30 min, laenger als das
+  Ableitungsfenster): Durchsichtmodus off `for: 00:30:00`, Betriebszeit > 1800,
+  und ein Template auf `last_changed` von Kalibrierfaktor/Kalibriert bei/den
+  drei Buttons. Details im README, Abschnitt "Durchsichtmodus".
 
 ### Namensgebung
 - Entity-Namen **ohne** `"Waage eG "`-Präfix im YAML, weil ESPHome den `friendly_name`
@@ -293,9 +294,10 @@ Gegenprobe mit Ohmmeter: E+/E− und A+/A− müssen etwa gleich sein (~1 kΩ).
   Neukalibrierung mit −8.770) steht in
   [`docs/sessionbericht-2026-08-03.md`](docs/sessionbericht-2026-08-03.md).
   **Nach jedem Flash trotzdem den Kalibrierfaktor prüfen** - das bleibt gültig.
-- **Schwarm-Alarm gegen den Durchsichtmodus sperren** — sonst loest er nach
-  jeder Durchsicht aus, bei der Gewicht abgenommen wurde. Bedingung siehe
-  Abschnitt "Durchsichtmodus".
+- ~~**Schwarm-Alarm gegen den Durchsichtmodus sperren**~~ — **erledigt am
+  10.08.2026**, und gleich gegen Neustart und Kalibrierung mit. Siehe Abschnitt
+  "Durchsichtmodus". Offen bleibt dasselbe fuer `Bienen: Futtervorrat kritisch`
+  (weniger dringend, Schwellwert loest erst nach 2 h aus).
 - `input_number.leergewicht_beute` und `input_number.mindestgewicht_mit_futter` stehen
   beide noch auf 0,0 kg. Reale Werte eintragen (Beute leer wiegen; Mindestgewicht =
   Beute + Bienen + Mindestfutterreserve). Bis dahin liefert `binary_sensor.futtervorrat_kritisch`

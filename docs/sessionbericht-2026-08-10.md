@@ -100,7 +100,9 @@ Gewicht = Bruttogewicht − (Temperatur − calib_temp) × Koeffizient − Tara
 
 `calib_temp` ist die beim Nullpunkt festgehaltene Temperatur, sichtbar als
 „Kalibriert bei". Sie wird seit dem 03.08. mitgeschrieben — genau für diesen
-Zweck, und deshalb war jetzt keine Neukalibrierung nötig.
+Zweck. Der Einbau selbst brauchte deshalb keine Neukalibrierung: Der
+Bezugspunkt lag bereits vor. (Der Flash hat die Kalibrierung dann trotzdem
+gekostet, aber aus dem bekannten anderen Grund — siehe Abschnitt 3a.)
 
 ### Neu in Home Assistant
 
@@ -197,6 +199,71 @@ möglich (PlatformIO-Registry durch die Egress-Policy gesperrt).
 
 ---
 
+## 3a. Nachtrag am Abend: Flash, Neukalibrierung, Fehlalarm
+
+Die Firmware ist um 14:45 geflasht worden, nach zwei weiteren Neustarts lief
+sie ab 15:00. Drei Beobachtungen daraus:
+
+**Die Kalibrierung hat den Flash nicht überlebt** — wie befürchtet, das neue
+Global `letzte_temperatur` hat gereicht. Um 15:01/15:03 wurde neu kalibriert,
+beide Schritte. Faktor jetzt −20.874 counts/kg, „Kalibriert bei" 25,8 °C.
+Die Kompensation arbeitet: „Temperaturkorrektur" stand um 15:04 bei 0,002 kg
+(Kalibriertemperatur ≈ aktuelle Temperatur) und um 16:42 bei 0,018 kg.
+
+**Der Taktgeber läuft korrekt.** Kurzzeitig sah es nach einem Ausfall der
+automatischen Messung aus. War keiner: Bei 60 min Intervall setzen sowohl jeder
+Neustart als auch jeder Druck auf „Jetzt messen" den Zähler auf null, und
+davon gab es an dem Nachmittag vier. Die erste planmäßige Messung nach dem
+letzten Reset kam um **16:04:06**, exakt 3600 s nach 15:04:08. Auch die neue
+Warte-Sperre hat nicht gebremst: erster Wert nach dem Boot bei 61 s Betriebszeit.
+
+**Zwei Messungen lagen außerhalb des Takts** (16:37, 16:42), ohne dass eine
+HA-Button-Entity sich geändert hätte. Erklärung: Buttons, die über die
+**ESPHome-Weboberfläche auf Port 80** gedrückt werden, erreichen HA nicht — das
+Gerät führt `on_press` aus und veröffentlicht, die Button-Entity in HA bleibt
+auf ihrem alten Zeitstempel stehen. Das ist für die Fehlersuche wichtig und war
+für die Alarm-Sperre unten ausschlaggebend.
+
+**Der Schwarm-Alarm hat um 15:04:08 fehlausgelöst** (bestätigt über
+`last_triggered`). Die Neukalibrierung ließ das Gewicht von 2,2 auf −1,6 auf
+0,0 springen, der 20-min-Ableitungshelfer machte daraus −3,3 kg/h, Schwelle
+ist −3 kg/h. Die seit dem 03.08. offene Sperre war also nicht nur theoretisch
+fällig — und sie hätte in ihrer damals vorgeschlagenen Form **nicht geholfen**,
+weil der Durchsichtmodus die ganze Zeit aus war.
+
+### Die Sperre, wie sie jetzt eingebaut ist
+
+`Bienen: Schwarm-Alarm` hat drei Bedingungen zusätzlich zum Zeitfenster:
+
+| Sperre | Bedingung | Fängt ab |
+|---|---|---|
+| Durchsicht | `switch.waage_eg_durchsichtmodus` = off `for: 00:30:00` | Durchsicht, Honigernte |
+| Neustart | `sensor.waage_eg_betriebszeit` above 1800 | Neustart, vor allem der Flash mit Kalibrierungsverlust |
+| Kalibrierung | Template auf `last_changed` | Kalibrieren, Tarieren |
+
+Alle drei sperren **30 min**, nicht 20 — länger als das Ableitungsfenster,
+sonst steckt der Sprung beim Freigeben noch darin.
+
+Die Kalibrier-Sperre prüft `last_changed` von `sensor.waage_eg_kalibrierfaktor`,
+`sensor.waage_eg_kalibriert_bei` und den drei Buttons. **Die Diagnose-Sensoren
+sind die wichtigeren** — sie ändern sich unabhängig davon, ob der Druck aus HA
+oder aus der ESPHome-Weboberfläche kam (siehe oben). Verbleibende Lücke: ein
+Tara über die Weboberfläche hinterlässt keine eigene Entity.
+
+Dafür gibt es keine native Bedingung: `state` mit `for:` braucht einen festen
+Zielzustand, der Zustand eines Buttons ist aber der Zeitstempel des letzten
+Drucks. Gefragt ist „hat sich lange nicht geändert". Der Best-Practice-Prüfer
+des MCP-Servers meldet das Template an; die Begründung steht als `note:` in der
+Automation.
+
+**Geprüft:** Automation lädt (`state: on`, nicht `unavailable`), alle vier
+Bedingungen sind aktuell erfüllt — ein echter Schwarm käme also weiterhin durch.
+Gegenprobe auf die Situation um 15:04: Betriebszeit 242 s und Kalibrierung
+1 min her — zwei von drei Sperren hätten den Fehlalarm unabhängig voneinander
+verhindert.
+
+---
+
 ## 4. Nach dem Flash zu prüfen
 
 1. **Kalibrierfaktor** — erwartet rund **−20.845 counts/kg**. Dieser Flash
@@ -233,8 +300,9 @@ morgens, wenn die Temperatur nahe an den 24,6 °C des Bezugspunkts liegt.
   glätten (τ war hier ≈ 90 min, siehe Abschnitt 1). Bringt etwa Faktor 2.
 
 **Aus früheren Sessions weiterhin offen:**
-- **Schwarm-Alarm gegen den Durchsichtmodus sperren:** Bedingung
-  `switch.waage_eg_durchsichtmodus == off for: 00:30:00` fehlt noch.
+- ~~**Schwarm-Alarm gegen den Durchsichtmodus sperren**~~ — erledigt, siehe
+  Abschnitt 3a. Dasselbe fehlt noch für `Bienen: Futtervorrat kritisch`
+  (weniger dringend: der Schwellwert löst erst nach 2 h Überschreitung aus).
 - **Namen der neuen Stöcke festlegen** — vor dem ersten Flash.
 - **HA-Seite für die neuen Stöcke:** Helfer, Automationen, Dashboard.
 - `input_number.leergewicht_beute` / `mindestgewicht_mit_futter` stehen auf

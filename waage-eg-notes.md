@@ -543,8 +543,31 @@ condition:
     for: "00:30:00"
 ```
 
-Sinngemaess dasselbe fuer `Bienen: Futtervorrat kritisch`. **Noch nicht
-eingebaut** - steht in den offenen Punkten.
+**Eingebaut am 10.08.2026** - und dabei erweitert. Ausloeser war ein realer
+Fehlalarm um 15:04, der NICHT von einer Durchsicht kam, sondern von einer
+Neukalibrierung. Die Automation hat jetzt drei Sperren statt einer:
+
+| Sperre | Bedingung | Faengt ab |
+|---|---|---|
+| Durchsicht | `switch.…_durchsichtmodus` = off `for: 00:30:00` | Durchsicht, Honigernte |
+| Neustart | `sensor.…_betriebszeit` > 1800 | Neustart - vor allem den Flash, der die Kalibrierung verliert |
+| Kalibrierung | Template auf `last_changed` | Kalibrieren, Tarieren |
+
+**Die Kalibrier-Sperre haengt bewusst an den Diagnose-Sensoren**
+(`Kalibrierfaktor`, `Kalibriert bei`), nicht nur an den Buttons: Ein Druck
+ueber die ESPHome-Weboberflaeche erreicht die HA-Button-Entity nicht, die
+Sensoren aendern sich aber trotzdem. Am 10.08. war genau das zu beobachten -
+zwei Messungen ausserhalb des Takts, ohne dass ein HA-Button angefasst wurde.
+
+Fuer die Sperre gibt es keine native Bedingung: `state` mit `for:` braucht
+einen festen Zielzustand, der Zustand eines Buttons ist aber der Zeitstempel
+des letzten Drucks. Gefragt ist "hat sich lange nicht geaendert", und das kennt
+HA nicht nativ. Der Best-Practice-Pruefer des MCP-Servers meldet das Template
+an - begruendet abgewiesen, die Begruendung steht als `note:` in der
+Automation.
+
+Sinngemaess dasselbe fuer `Bienen: Futtervorrat kritisch` - dort noch offen und
+weniger dringend, weil der Schwellwert erst nach 2 h Ueberschreitung ausloest.
 
 ### Validierung
 
@@ -791,7 +814,7 @@ eines nicht ganz passenden Koeffizienten ab.
 
 | Automation | Auslöser | Verhalten |
 |---|---|---|
-| `Bienen: Schwarm-Alarm` | Schwarm-Signal unter −3 kg/h | Nur 9-18 Uhr (Schwärme gehen tagsüber ab). Push + persistente Meldung |
+| `Bienen: Schwarm-Alarm` | Schwarm-Signal unter −3 kg/h | Nur 9-18 Uhr (Schwärme gehen tagsüber ab), und nur wenn seit 30 min keine Durchsicht, kein Neustart und keine Kalibrierung war. Push + persistente Meldung |
 | `Bienen: Messintervall nach Saison` | täglich 3 Uhr | Mai/Juni `15`, März/April + Juli/Aug `60`, sonst `720` |
 | `Bienen: Futtervorrat kritisch` | Schwellwert 2 h lang überschritten | Push + Meldung mit 24h-Bilanz |
 | `Bienen: Waage offline` | `binary_sensor.waage_eg_verbindung` 1 h aus | Meldung, wird bei Rückkehr automatisch zurückgenommen |
