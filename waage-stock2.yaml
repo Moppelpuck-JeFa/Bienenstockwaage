@@ -44,6 +44,13 @@ substitutions:
   start_messintervall: "360"        # min (= 6 h)
   start_durchsicht_dauer: "60"      # min
 
+  # Temperaturkompensation AUS, bis der eigene Koeffizient gemessen ist.
+  # Der Wert von waage-eg (+32,5 g/K) gilt fuer dessen Zellen und dessen
+  # Aufbau und laesst sich nicht uebernehmen - ein geratener Koeffizient
+  # macht die Messung schlechter, nicht besser, und man sieht es nicht.
+  # Vorgehen zum Messen: README, Abschnitt "Temperaturkompensation".
+  start_temp_koeffizient: "0.0"     # g/K
+
 packages:
   basis: !include packages/waage-basis.yaml
 

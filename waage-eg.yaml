@@ -44,6 +44,15 @@ substitutions:
   start_messintervall: "360"        # min (= 6 h)
   start_durchsicht_dauer: "60"      # min
 
+  # Temperaturkoeffizient, gemessen an DIESEM Aufbau: 03.-10.08.2026,
+  # 164 Messpunkte ueber 6,8 Tage und 9,4 K Temperaturhub.
+  # Herleitung und Guete: docs/sessionbericht-2026-08-10.md
+  #
+  # Wie alle start_-Werte nur der Startwert fuer den allerersten Boot. Ist die
+  # Number-Entity "Waage eG Temperaturkoeffizient" einmal gesetzt, gilt der
+  # Wert aus HA - diese Zahl hier aendern bringt dann nichts mehr.
+  start_temp_koeffizient: "32.5"    # g/K
+
 packages:
   basis: !include packages/waage-basis.yaml
 

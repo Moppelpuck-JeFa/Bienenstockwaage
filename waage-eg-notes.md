@@ -26,6 +26,9 @@ ESPHome Device Builder Add-on in Home Assistant.
   "Negative Signalpolarität".
 - Die Zellen sind nicht C3-klassifiziert - Temperaturdrift und Kriechen liegen
   über den Werten im Abschnitt "Auflösung", der Absolutwert wird also weicher.
+  Beides ist inzwischen beziffert: **+32,5 g/K** Temperaturdrift (wird
+  kompensiert) und **−10,9 g/Tag** abklingendes Kriechen nach dem Auflegen
+  der Last (wird nicht kompensiert).
 
 ### Was der gemessene Faktor bedeutet
 
@@ -330,11 +333,13 @@ wäre elektrisch darstellbar.
 
 **Praktisch begrenzen drei andere Dinge**, alle größer als 0,1 kg:
 
-1. **Temperaturdrift.** C3-Zellen driften typisch in der Größenordnung
-   0,02 %/10 K der Nennlast. Auf 200 kg sind das ~40 g pro 10 K. Draußen sind
-   20-30 K Tagesgang normal → **80-120 g**, also rund ein Anzeigeschritt.
-   Die Temperaturkompensation wurde auf Wunsch entfernt (siehe unten), damit
-   bleibt dieser Anteil unkorrigiert.
+1. **Temperaturdrift - inzwischen gemessen und herausgerechnet.** Die
+   Schätzung hier lautete 40 g pro 10 K (C3-Werte). Real gemessen wurden an
+   diesem Aufbau **+32,5 g/K**, also rund das Achtfache - erwartbar, weil die
+   verbauten YZC-161 eben nicht C3-klassifiziert sind. Über 20 K Tagesgang
+   sind das 0,65 kg und damit der mit Abstand größte Posten dieser Liste.
+   Seit dem 10.08.2026 wird er kompensiert; übrig bleiben rund 15 g
+   Reststreuung. Siehe Abschnitt "Temperaturkompensation".
 2. **Eckenfehler** ohne getrimmte Junction-Box: 0,5-2 %, bei 50 kg Auflage
    also **250 g bis 1 kg**. Das ist der mit Abstand größte Posten - Details in
    `docs/waegezellen-verkabelung.md`.
@@ -359,9 +364,9 @@ Abschnitt "Frei wählbares Referenzgewicht".
   - bei 0,1er-Rundung war es exakt deckungsgleich mit der Rundung selbst und
   damit wirkungslos. Geblieben ist nur die Normalisierung von `-0.0` auf `0.0`,
   damit HA keine negative Null anzeigt.
-- Folge davon: eine leere Waage kann jetzt statt exakt 0,0 auch mal ±0,1
-  anzeigen, wenn sie thermisch weggedriftet ist. Das ist ehrlicher als ein
-  Deadband, das echte kleine Gewichte verschluckt.
+- Folge davon: eine leere Waage kann statt exakt 0,0 auch mal ±0,1 anzeigen.
+  Das ist ehrlicher als ein Deadband, das echte kleine Gewichte verschluckt.
+  Der thermische Anteil daran ist seit dem 10.08.2026 herausgerechnet.
 
 ## Frei wählbares Referenzgewicht (ersetzt die fest verdrahteten 0,5 kg)
 
@@ -552,44 +557,120 @@ waehrend der Durchsicht, erster Wert exakt nach Dauer + 2 min, vorzeitiges
 Beenden, Verlaengern, Blinkgrenze bei 5 Restminuten, Verhalten bei 15-min- und
 60-min-Messintervall, Neustart mitten in der Durchsicht.
 
-## Temperatur: erst messen, dann entscheiden
+## Temperaturkompensation
 
-Der DS18B20 ist wieder drin - **aber ausschließlich als Messwert, ohne jede
-Korrekturrechnung**. Begründung: Die verbauten YZC-161 sind nicht
-C3-klassifiziert, ihre Nullpunktdrift dürfte grob bei 0,2-1,2 kg über einen
-Tagesgang von 20-30 K liegen. Das ist bei 0,1 kg Auflösung erheblich und liegt
-genau im Signalband, das interessiert (ein mäßiger Trachttag bringt auch nur
-ein paar hundert Gramm).
+**Stand 10.08.2026: gemessen, eingebaut, aktiv.** Die Entscheidung, die hier
+lange offen stand ("saubere Gerade oder breit streuende Punktwolke?"), ist
+beantwortet - es ist eine Gerade, und sie ist steil genug, dass sich das
+Rechnen lohnt.
 
-Ein geratener Koeffizient würde die Sache aber verschlechtern, nicht
-verbessern. Deshalb zuerst ein paar Tage mit **konstanter Last** loggen,
-Gewicht gegen Temperatur auftragen und erst dann entscheiden. Streut die
-Punktwolke breit, dominieren thermische Gradienten zwischen den vier Zellen -
-und die kann ein einzelner Sensor prinzipiell nicht korrigieren.
+| | |
+|---|---|
+| Koeffizient | **+32,5 g/K** (± 0,7 statistisch, real eher ± 3) |
+| Datenbasis | 164 Punkte, 6,8 Tage, 17,5-26,9 °C |
+| Zweiter, unabhängiger Effekt | −10,9 g/Tag (abklingendes Kriechen) |
+| Anzeigeschwankung bei konstanter Last | 324 g → 84 g |
+| Hysterese Erwärmung ↔ Abkühlung | ±1,4 g |
 
-**`calib_temp` wird schon jetzt mitgespeichert.** Die Nullpunkt-Kalibrierung
-hält die Temperatur fest, bei der sie stattfand (sichtbar als "Waage eG
-Kalibriert bei"). Der Wert lässt sich nachträglich nicht rekonstruieren - ohne
-ihn müsste man später allein deswegen neu kalibrieren. Er ist der Bezugspunkt
-für `kg -= (temp_jetzt - calib_temp) * koeffizient`, falls es dazu kommt.
+Herleitung, Teilmengen-Analyse und Validierung stehen vollständig in
+[`docs/sessionbericht-2026-08-10.md`](docs/sessionbericht-2026-08-10.md).
 
-**Warum der DS18B20 einen eigenen 60s-Takt hat** statt im Messintervall der
-Waage mitzulaufen: So ist der Wert für die Kalibrier-Buttons immer frisch
-(max. 60 s alt), und eine dichte Temperaturreihe neben einer groben
-Gewichtsreihe ist für die Analyse besser als umgekehrt - herunterrechnen kann
-man später immer, nachträglich verdichten nicht.
+### Gerechnet wird
 
-**Die Alternative, die nichts kostet:** Gewicht täglich zur selben Uhrzeit
-vergleichen (üblich sind die frühen Morgenstunden - stabilste Temperatur, alle
-Bienen im Stock). Damit kürzt sich der Tagesgang weitgehend heraus, ohne
-Sensor und ohne Koeffizient. Für Trachtbilanz und Futterverbrauch reicht das;
-nur für eine belastbare Intraday-Kurve nicht.
+```
+Gewicht = Bruttogewicht − (Temperatur − calib_temp) × Koeffizient − Tara
+```
+
+`calib_temp` ist die beim Nullpunkt-Kalibrieren festgehaltene Temperatur
+("Kalibriert bei"). Genau dort ist die Korrektur null. Dass dieser Wert schon
+seit dem 03.08. mitgeschrieben wird - damals ausdrücklich "für den Fall, dass
+es dazu kommt" - hat sich jetzt ausgezahlt: Der Einbau kam ohne
+Neukalibrierung aus.
+
+### Warum der Koeffizient eine Number-Entity ist
+
+Er ist eine **Messgröße, keine Konstante**: Er hängt an diesen vier Zellen, an
+dieser Verkabelung und an diesem Aufbau. Nach dem Umzug in den Garten ist er
+neu zu bestimmen. Als Number kostet das Nachjustieren eine Eingabe in HA -
+fest im YAML kostete es einen Flash, und **jeder Flash kann die Kalibrierung
+mitnehmen** (03.08.2026 real passiert). Bei einer Größe, die man
+erklärtermaßen noch mehrfach anfassen wird, ist das der falsche Preis.
+
+`0` schaltet die Kompensation ab. Das ist die Vorgabe für neue Stöcke: Ein
+geratener Koeffizient macht die Messung schlechter, nicht besser - und man
+sieht es nicht, weil das Ergebnis weiter plausibel aussieht.
+
+### Die Fallstricke, die beim Einbau zählten
+
+**Tara muss die Korrektur mit abziehen.** Sonst friert das Tara die Korrektur
+des Druckzeitpunkts ein, und die Drift wandert mit jedem Grad wieder ins
+Gewicht zurück: nach dem Tarieren exakt null, über den Tag um den vollen
+Temperaturhub daneben. Das ist die Stelle, an der eine Kompensation typisch
+falsch eingebaut wird, weil sie sich beim Ausprobieren völlig richtig anfühlt.
+
+**Die Formel steht genau einmal da** - in `packages/waage-temperatur.h`,
+eingebunden über `esphome: includes:`. Gebraucht wird sie an drei Stellen
+(Gewicht, Tara, Diagnose-Entity); dreimal ausgeschrieben liefe sie
+irgendwann auseinander. Der Pfad muss `packages/waage-temperatur.h` lauten -
+er löst gegen das Verzeichnis der geflashten Stock-Datei auf, genau wie
+`!secret` und das `!include` des Packages.
+
+**Der Rohwert bleibt unkompensiert.** Er ist die Grundlage jeder künftigen
+Nachmessung. Aus demselben Grund behält der DS18B20 seinen eigenen 60-s-Takt.
+
+**Ohne Bezugspunkt wird nicht kompensiert.** Fehlt `calib_temp`, bleibt die
+Korrektur 0 statt geraten zu werden.
+
+**Ein Aussetzer des DS18B20 darf das Gewicht nicht springen lassen.** Die
+letzte gültige Temperatur liegt in einem Global; ohne das fiele die
+Kompensation bei einem fehlgeschlagenen 1-Wire-Lesevorgang stumm aus und das
+Gewicht spränge um bis zu 0,3 kg - in HA nicht von einem Schwarm oder einer
+Ernte zu unterscheiden. Dasselbe Motiv wie beim Durchsichtmodus: keine
+Artefakte in eine Statistik lassen, die für immer da stehen.
+
+**Nach einem Neustart wird auf die erste Temperatur gewartet** (höchstens
+3 min, und nur bei aktiver Kompensation). HX711 und DS18B20 laufen beide im
+60-s-Takt und melden sich in unbestimmter Reihenfolge.
+
+### Was sie nicht kann
+
+Sie korrigiert die **gemeinsame** Temperatur aller vier Zellen. Thermische
+Gradienten zwischen den Zellen - eine Ecke in der Sonne - kann ein einzelner
+Sensor prinzipiell nicht sehen. Dass die hier klein sind, war die Bedingung
+für den Einbau und ist mit der Hysterese von ±1,4 g belegt. **Nach dem Umzug
+in den Garten ist genau das erneut zu prüfen.**
+
+Nicht korrigiert wird außerdem das Kriechen der Zellen (−10,9 g/Tag,
+abklingend). Das ist ein eigener Effekt und hat mit der Temperatur nichts zu
+tun.
+
+### Der thermische Nachlauf - bewusst nicht eingebaut
+
+Glättet man die Temperatur vor dem Fit mit τ ≈ 90 min, fällt die
+Reststreuung von 15 g auf 8 g und der Koeffizient läge bei 34,7 g/K. Eingebaut
+ist es trotzdem nicht: Die Firmware rechnet mit dem *momentanen* Sensorwert,
+und dazu gehören die 32,5 - die 34,7 mit einem ungefilterten Messwert zu
+verrechnen würde überkorrigieren. Außerdem hängt τ an der thermischen Masse
+des Aufbaus und wird im Garten anders ausfallen. Bleibt als Reserve, wenn die
+15 g je stören.
+
+### Die Variante ohne alles
+
+Gewicht immer zur selben Uhrzeit vergleichen, am besten vor Sonnenaufgang.
+Das kürzt den Tagesgang weitgehend heraus, ohne Sensor und ohne Koeffizient -
+und es fängt zusätzlich den Restfehler eines nicht ganz passenden
+Koeffizienten ab. Der Helfer "Waage Tagesbilanz" macht genau das.
 
 ## Explizit NICHT (mehr) enthalten
-- **Temperaturkompensation als Rechnung** - der Sensor misst, korrigiert wird
-  nichts. Siehe Abschnitt oben. Die frühere Fassung (DS18B20 auf D4 plus
-  Number-Entity für den Koeffizienten) war auf expliziten Wunsch entfernt
-  worden; der Sensor sitzt jetzt auf D5 und ohne Korrekturterm.
+- ~~**Temperaturkompensation als Rechnung**~~ - **seit 10.08.2026 doch
+  enthalten**, siehe Abschnitt oben. Der Weg dahin war der beabsichtigte: erst
+  entfernen, weil der Koeffizient nur geraten gewesen wäre, dann messen, dann
+  mit einer belegten Zahl wieder einbauen. Die Number-Entity für den
+  Koeffizienten ist damit auch wieder da - diesmal aus einem anderen Grund
+  (Nachjustieren ohne Flash), und der Sensor bleibt auf D5.
+- **Keine Glättung der Temperatur vor der Verrechnung.** Würde die
+  Reststreuung etwa halbieren, braucht aber ein τ, das am Zielstandort anders
+  ausfällt. Siehe Abschnitt "Temperaturkompensation".
 - Kein `hx711.tare` als Action verwendet (existiert in ESPHome nicht -
   war ein Fehler in einer früheren Version, korrigiert per Lambda+Globals)
 - Physischer Tara-Taster wurde bewusst verworfen, stattdessen virtueller
@@ -658,7 +739,14 @@ nur für eine belastbare Intraday-Kurve nicht.
 4. Secrets in `secrets.yaml` ergänzen - Vorlage liegt als `secrets.yaml.example`
    bei: `wifi_ssid`, `wifi_password`, `ap_fallback_password`,
    `api_encryption_key`, `ota_password`
-5. Optional/später denkbar (nur angesprochen, nicht umgesetzt):
+5. **Temperaturkoeffizient nach dem Umzug in den Garten neu bestimmen.** Die
+   32,5 g/K stammen vom Steckbrett-Aufbau am Netzteil. Im Garten ändert sich
+   die thermische Ankopplung, und die Voraussetzung "alle vier Zellen gleich
+   warm" ist dort am ehesten verletzt (Sonne auf einer Seite). Vorgehen im
+   README, Abschnitt "Den Koeffizienten für einen neuen Stock bestimmen".
+6. **Dashboard:** "Temperaturkorrektur" und "Temperaturkoeffizient" sind noch
+   nicht eingebunden.
+7. Optional/später denkbar (nur angesprochen, nicht umgesetzt):
    - Deep Sleep für Batteriebetrieb (Trade-off: Buttons dann nicht
      jederzeit erreichbar - und die Sampling-Strategie müsste umgebaut werden).
      **Der Pin-Blocker ist inzwischen beseitigt** (DOUT liegt auf GPIO12,
@@ -695,7 +783,9 @@ Ein Helfer kann nicht beides.
 **Warum `statistics/change/24h` und nicht ein Bastelwerk aus `input_number`
 plus Automation:** Der Wert vergleicht immer *jetzt gegen dieselbe Uhrzeit
 gestern*. Damit ist die "immer zur selben Tageszeit ablesen"-Methode gegen die
-Temperaturdrift schon eingebaut, ohne eine einzige Automation.
+Temperaturdrift schon eingebaut, ohne eine einzige Automation. Das gilt
+unabhängig von der Kompensation weiter und fängt zusätzlich den Restfehler
+eines nicht ganz passenden Koeffizienten ab.
 
 ### Automationen
 

@@ -88,13 +88,30 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   darstellbar ist).
 - Elektrisch unkritisch (0,1 kg ≈ 1.800 counts vs. ~21 counts HX711-Rauschen).
 - **Begrenzend ist die Mechanik**, nicht der ADC: Eckenfehler ohne getrimmte Junction-Box
-  0,5–2 % (250 g – 1 kg bei 50 kg), Temperaturdrift, Kriechen.
+  0,5–2 % (250 g – 1 kg bei 50 kg), Kriechen. Die Temperaturdrift war der größte
+  Posten und wird seit dem 10.08.2026 herausgerechnet.
 
-### Temperatur
-- DS18B20 **misst**, es wird **nicht kompensiert** — Koeffizient ist unbekannt, ein
-  geratener Koeffizient würde die Messung unbemerkt verschlechtern.
-- `calib_temp` wird bei Nullpunkt-Kalibrierung mitgespeichert (nicht nachträglich
-  rekonstruierbar).
+### Temperatur — wird kompensiert (seit 10.08.2026)
+- **+32,5 g/K**, gemessen über 6,8 Tage und 9,4 K (164 Punkte). Herleitung:
+  [`docs/sessionbericht-2026-08-10.md`](docs/sessionbericht-2026-08-10.md).
+- Gerechnet wird `kg -= (Temperatur − calib_temp) × Koeffizient`, danach erst Tara.
+  `calib_temp` ist die bei der Nullpunkt-Kalibrierung festgehaltene Temperatur
+  ("Kalibriert bei"), dort ist die Korrektur null. Fehlt sie, wird **nicht**
+  kompensiert.
+- Die Formel steht **einmal**, in `packages/waage-temperatur.h` (über
+  `esphome: includes:`), weil sie an drei Stellen gebraucht wird: Gewicht, Tara,
+  Diagnose-Entity. Pfad dort muss `packages/…` lauten — er löst gegen das
+  Verzeichnis der geflashten Stock-Datei auf.
+- **Tara zieht die Korrektur mit ab.** Sonst wandert die Drift nach dem Tarieren
+  wieder ins Gewicht zurück. Klassischer Fehler, fällt beim Ausprobieren nicht auf.
+- Koeffizient ist eine **Number-Entity** (g/K, `0` = aus), nicht fest im YAML:
+  er ist eine Messgröße und muss am Zielstandort neu bestimmt werden — und jeder
+  Flash kann die Kalibrierung mitnehmen.
+- **Der Rohwert bleibt unkompensiert**, sonst wäre er für eine Nachmessung wertlos.
+- Neue Stöcke starten mit `0`. Der Wert von waage-eg gilt nur für dessen Aufbau.
+- Nicht kompensiert: Kriechen (−10,9 g/Tag, abklingend) und Gradienten zwischen den
+  vier Zellen (kann ein einzelner Sensor prinzipiell nicht).
+- Prüfprogramm ohne Hardware: `tests/waage-temperatur-test.cpp` (`g++`, 4028 Prüfungen).
 
 ### Durchsichtmodus
 - Hardware-Taster am Stock sperrt die **Veroeffentlichung** (nicht die Messung)
@@ -186,6 +203,9 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
 Bienenstockwaage/
 ├── packages/waage-basis.yaml          # GESAMTE gemeinsame Logik - die eigentliche
 │                                       #   Codedatei. Wird nicht direkt geflasht.
+├── packages/waage-temperatur.h        # Formel der Temperaturkompensation, einmal
+│                                       #   statt dreimal (esphome: includes:)
+├── tests/waage-temperatur-test.cpp    # Prueft ebendiese Formel mit g++, ohne Hardware
 ├── waage-eg.yaml                      # Stock 1: nur substitutions + package-Include
 ├── waage-stock2.yaml                  # Stock 2, dito
 ├── waage-stock3.yaml                  # Stock 3, dito
@@ -194,6 +214,7 @@ Bienenstockwaage/
 ├── waage-eg-notes.md                  # Entscheidungen, Begründungen, HA-Seite
 ├── docs/waegezellen-verkabelung.md    # Abschnitt 0 = Halbbrücken-Ring (relevant),
 │                                       #   Abschnitte 1-6 = Vollbrücken-Referenz
+├── docs/sessionbericht-*.md           # Was wann warum geaendert wurde
 ├── README.md                          # Inbetriebnahme, Kalibrieren, Fehlersuche
 └── .gitignore                         # secrets.yaml, .esphome/, *.bin
 ```
@@ -266,12 +287,12 @@ Gegenprobe mit Ohmmeter: E+/E− und A+/A− müssen etwa gleich sein (~1 kΩ).
 - Details: [`docs/sessionbericht-2026-08-04.md`](docs/sessionbericht-2026-08-04.md)
 
 **Sofort anzupassen (Platzhalter):**
-- **NEU KALIBRIEREN, beide Schritte.** Beim Flash am 03.08. ging die
-  Kalibrierung verloren (Faktor fiel auf den Platzhalter 3.500); die
-  anschliessende Neukalibrierung setzte nur den Referenzpunkt, nicht den
-  Nullpunkt. Der Faktor steht dadurch bei −8.770 statt −20.840 und die Waage
-  misst falsch. Erkennungszeichen: "Kalibriert bei" ist leer.
-  Details in [`docs/sessionbericht-2026-08-03.md`](docs/sessionbericht-2026-08-03.md).
+- ~~**NEU KALIBRIEREN, beide Schritte.**~~ **Erledigt am 03.08. um 16:36/16:41.**
+  Faktor steht bei −20.845, "Kalibriert bei" bei 24,6 °C, "Kalibriert mit" bei
+  2,218 kg. Der Ablauf davor (Faktor auf dem Platzhalter 3.500, dann eine halbe
+  Neukalibrierung mit −8.770) steht in
+  [`docs/sessionbericht-2026-08-03.md`](docs/sessionbericht-2026-08-03.md).
+  **Nach jedem Flash trotzdem den Kalibrierfaktor prüfen** - das bleibt gültig.
 - **Schwarm-Alarm gegen den Durchsichtmodus sperren** — sonst loest er nach
   jeder Durchsicht aus, bei der Gewicht abgenommen wurde. Bedingung siehe
   Abschnitt "Durchsichtmodus".
@@ -281,13 +302,14 @@ Gegenprobe mit Ohmmeter: E+/E− und A+/A− müssen etwa gleich sein (~1 kΩ).
   fälschlich "nicht kritisch".
 - Schwarm-Schwellwert von −3 kg/h nach der ersten echten Saison nachjustieren.
 
-**Offene Messung:**
-- Temperaturdrift bestimmen: konstante bekannte Last auflegen, Messintervall auf 15 min,
-  einige Tage laufen lassen, dann Rohwert gegen Temperatur in der Dashboard-Ansicht
-  "Auswertung" vergleichen.
-  - Parallele Kurven → systematische Drift, Kompensation würde sich lohnen.
-  - Breit streuende Punktwolke → Eckengradienten dominieren, ein einzelner Sensor kann
-    das nicht korrigieren → dann auf Tagesbilanz verlassen.
+**Temperaturdrift — erledigt, aber am Zielstandort zu wiederholen:**
+- Ergebnis: +32,5 g/K, Hysterese ±1,4 g (also keine dominierenden Eckengradienten),
+  Kompensation eingebaut und aktiv.
+- **Nach dem Umzug in den Garten neu bestimmen.** Vorgehen: konstante Last auflegen,
+  Messintervall auf 15–60 min, `Bienen: Messintervall nach Saison` vorübergehend
+  ausschalten, mindestens fünf Tage laufen lassen, dann Rohwert gegen Temperatur
+  fitten — **mit einem Zeitglied als zweitem Term**, sonst schiebt das Kriechen den
+  Koeffizienten nach oben. Einzeltage taugen nicht (streuten zwischen 23 und 35 g/K).
 
 **Deep Sleep / Batteriebetrieb (Zielaufbau: Garten, Solar, NiMH 2600 mAh):**
 - Der Pin-Blocker ist beseitigt: DOUT liegt jetzt auf D6 (GPIO12), GPIO16 bleibt
@@ -321,9 +343,9 @@ produktiv läuft und in Home Assistant eingebunden ist. Im Repo-Root liegt die D
 waage-eg-claude-code-kontext.md mit der vollständigen Zusammenfassung aller bisherigen
 Entscheidungen, Fallstricke und offenen Punkte — bitte lies sie zuerst komplett.
 
-Aktuell will ich als Nächstes: [HIER EINTRAGEN, z. B. "die Temperaturdrift-Messung
-auswerten" oder "input_number.leergewicht_beute korrekt setzen" oder "die
-secrets.yaml-Frage klären"].
+Aktuell will ich als Nächstes: [HIER EINTRAGEN, z. B. "den Schwarm-Alarm gegen den
+Durchsichtmodus sperren" oder "input_number.leergewicht_beute korrekt setzen" oder
+"die neuen Stöcke benennen und die HA-Seite dafür anlegen"].
 
 Bitte halte dich an die dort dokumentierten Konventionen (deutsche Sprache in Code/
 Doku, keine calibrate_linear-Kalibrierung, restore_from_flash: true nicht entfernen,
