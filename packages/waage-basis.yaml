@@ -895,8 +895,22 @@ number:
       # Das laufende Fenster wird dabei verworfen: es gehörte zum alten
       # Intervall, und ein halb volles Fenster als erster Wert des neuen wäre
       # eine Mischung aus beidem.
-      - script.execute: messfenster_frisch
-      - script.execute: messwerte_veroeffentlichen
+      #
+      # NUR wenn der HX711 schon misst. Dieses on_value feuert naemlich auch
+      # beim Booten, wenn die Number ihren gespeicherten Wert wiederherstellt -
+      # und zwar BEVOR die Kalibrier-Globals aus dem Flash geladen sind. Ohne
+      # diese Sperre gingen dann einmal die Platzhalter nach HA (11.08.2026 real
+      # beobachtet: "Kalibrierfaktor 3.500" und "Kalibriert mit 0,5 kg" fuer
+      # 50 Sekunden). Genau diese Zahlen sind das vereinbarte Alarmzeichen fuer
+      # "Kalibrierung verloren" - sie faelschlich zu senden ist schlimmer, als
+      # eine Sekunde spaeter zu messen. Der HX711 liefert seinen ersten
+      # gefilterten Wert nach 5 s; jede echte Bedienung liegt also lange danach.
+      - if:
+          condition:
+            lambda: 'return !std::isnan(id(hx711_raw_counts).state);'
+          then:
+            - script.execute: messfenster_frisch
+            - script.execute: messwerte_veroeffentlichen
       - lambda: |-
           id(minuten_seit_messung) = 0;
           ESP_LOGI("waage", "Messintervall auf %.0f min gesetzt", x);

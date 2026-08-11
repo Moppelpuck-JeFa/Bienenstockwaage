@@ -5,8 +5,9 @@ genauer zu werden"
 
 **Ergebnis:** Umgesetzt. Der veröffentlichte Wert ist jetzt der Mittelwert
 aller Rohwerte seit der letzten Messung statt einer Momentaufnahme. Zwei neue
-Diagnose-Entities. **Nicht geflasht** — geprüft nur mit `esphome config` und
-dem g++-Test.
+Diagnose-Entities. Am selben Abend um 19:21 Uhr geflasht — was dabei
+herauskam, steht in **Abschnitt 10**, samt einem Fehler, den erst der Betrieb
+gezeigt hat.
 
 **Branch:** `claude/rohwerte-messintervall-mittel-ddd3ss`
 
@@ -229,3 +230,69 @@ Ein vollständiger `esphome compile` war wie immer nicht möglich
   √N drückt. Ein Median ohne nachgeschaltete Glättung wäre für die Mittelung
   sauberer — aber die Buttons und die Anzeige beim Kalibrieren hängen an genau
   dieser Glättung. Bewusst gelassen, wäre eine eigene Änderung mit eigenem Test.
+
+---
+
+## 10. Nachtrag am Abend: geflasht, zwei Befunde
+
+Das Gerät wurde um **19:21 Uhr** geflasht (Betriebszeit-Verlauf: `unavailable`,
+dann Neustart). Beide neuen Entities sind da, "Rohwert" hat die Nachkommastelle.
+
+### Befund 1 — die Kalibrierung war schon vorher kaputt
+
+Der Kalibrierfaktor steht auf **+753,58 counts/kg**, weit außerhalb des
+Erwartungsbereichs −18.000 bis −21.000, und mit falschem Vorzeichen.
+"Kalibriert mit" zeigt 26,221 kg, "Kalibriert bei" 22,9 °C. Das Gewicht von
+39,9 kg ist damit bedeutungslos.
+
+**Das ist nicht der Flash gewesen.** Der Verlauf von
+`sensor.waage_eg_kalibrierfaktor` datiert den Bruch auf den **11.08. um
+13:59:22** — 13:57 stand dort noch −17.532, ab 13:59 +847. Der Flash war
+5½ Stunden später. Dazwischen lief durchgehend die alte Firmware.
+
+Der Tagesverlauf davor zeigt ohnehin eine Reihe von Kalibrierversuchen:
+10.08. 21:30 noch −20.874 (2,218 kg Referenz), dann über −4.401, −21.993,
+−16.948, −15.349 (7,235 kg Referenz) bis 11.08. 11:39 auf 26,221 kg Referenz
+gewechselt und −15.731 … −17.532. Keiner dieser Werte liegt im
+Erwartungsbereich; der Bruch um 13:59 ist nur der letzte Schritt.
+
+Aus einem Span von +19.760 counts für nominell 26,221 kg (statt der zu
+erwartenden −547.000) folgt: Beim Setzen des Referenzpunkts war die Last
+praktisch dieselbe wie beim Nullpunkt, nur minimal in die andere Richtung.
+Das passt zu "Nullpunkt mit aufliegendem Gewicht gesetzt" oder zu "gedrückt,
+bevor die ~60 s Filterlaufzeit durch waren" — welches von beidem, sagt nur das
+ESPHome-Log (der Referenz-Button loggt den Span, den er gespeichert hat).
+
+**Zu tun:** beide Kalibrierschritte sauber neu fahren, zwischen Auflegen und
+Drücken jeweils gut eine Minute warten. Die Span-Prüfung fängt diesen Fall
+nicht: 19.760 counts liegen weit über der 500er-Schwelle.
+
+### Befund 2 — ein Fehler in dieser Änderung, aus den Verlaufsdaten
+
+Um **19:22:12**, elf Sekunden nach dem Neustart, standen in HA für 50 Sekunden
+**"Kalibrierfaktor 3.500"** und **"Kalibriert mit 0,5 kg"** — die Platzhalter.
+Um 19:23:02 waren die echten Werte da. Die beiden vorherigen Neustarts
+(14:03 und 14:46, alte Firmware) zeigen diesen Ausschlag **nicht**.
+
+Ursache: `mess_intervall.on_value` feuert auch beim Booten, wenn die
+Number-Entity ihren gespeicherten Wert wiederherstellt — und zwar bevor die
+Kalibrier-Globals aus dem Flash geladen sind. Vorher veröffentlichte dieser
+Zweig nur Gewicht und Betriebszeit (und das Gewicht schwieg mangels
+HX711-Wert). Seit er über `messwerte_veroeffentlichen` läuft, gehen auch die
+Kalibrier-Diagnosen mit — mit den `initial_value`-Platzhaltern.
+
+Das ist mehr als ein Schönheitsfehler: **3.500 und 0,5 kg sind genau das
+vereinbarte Alarmzeichen für "Kalibrierung verloren"**, und die Automation
+`Bienen: Schwarm-Alarm` hängt ihre 30-Minuten-Sperre an `last_changed` von
+"Kalibrierfaktor".
+
+**Behoben:** Der Zweig veröffentlicht nur noch, wenn der HX711 bereits einen
+gefilterten Wert hat. Beim Booten ist das nicht der Fall (erster Wert nach
+5 s), bei jeder echten Bedienung längst. Der erste planmäßige Messwert kommt
+unverändert nach ~1 Minute aus dem Taktgeber.
+
+### Dashboard
+
+"Rohwert Streuung" ist in der Ansicht **Technik** eingebaut, direkt neben
+"Rohwert", samt Erläuterung im Hinweistext darunter. "Temperatur Mittel" ist
+weiterhin nirgends eingebunden.
