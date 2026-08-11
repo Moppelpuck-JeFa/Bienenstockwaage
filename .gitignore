@@ -5,3 +5,7 @@ secrets.yaml
 .esphome/
 .esphome-*/
 *.bin
+
+# Kompilat des g++-Tests und die nicht mitgelieferte Messreihe dazu
+tests/test
+tests/paare.csv

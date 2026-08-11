@@ -17,10 +17,12 @@ HA-Seite (7 Helfer, 4 Automationen, 3-Ansichten-Dashboard) ist eingerichtet. Es 
 sich jetzt um Feinschliff, offene Messungen und mögliche Erweiterungen — nicht mehr um
 einen Neuaufbau von Null.
 
-**Repo:** `github.com/Moppelpuck-JeFa/Bienenstockwaage` (privat). **Stand: 10.08.2026.**
+**Repo:** `github.com/Moppelpuck-JeFa/Bienenstockwaage` (privat). **Stand: 11.08.2026.**
 Die Temperaturkompensation liegt auf dem Branch
 `claude/temperature-compensation-0l9ztn` und ist geflasht und aktiv, aber noch
-nicht nach `main` gemerged.
+nicht nach `main` gemerged. Die Messfenster-Mittelung liegt auf
+`claude/rohwerte-messintervall-mittel-ddd3ss` und ist **noch nicht geflasht** —
+sie ist nur mit `esphome config` und dem g++-Test geprüft.
 
 **Chronologie in den Sessionberichten** — bei "warum ist das so?" zuerst dort nachsehen:
 
@@ -29,6 +31,7 @@ nicht nach `main` gemerged.
 | [03.08.](docs/sessionbericht-2026-08-03.md) | Temperaturdrift erstmals ausgewertet, Deep-Sleep-Vorbereitung, Durchsichtmodus, Kalibrierungsverlust |
 | [04.08.](docs/sessionbericht-2026-08-04.md) | Umstellung auf substitutions/packages, Namensschema |
 | [10.08.](docs/sessionbericht-2026-08-10.md) | Temperaturkompensation eingebaut, Schwarm-Alarm gesperrt |
+| [11.08.](docs/sessionbericht-2026-08-11.md) | Rohwerte über das Messintervall gemittelt, Diagnose "Rohwert Streuung" und "Temperatur Mittel" |
 
 **Wichtig:** Workflow-Sprache ist Deutsch — Code-Kommentare, YAML-Labels, Entity-Namen
 und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
@@ -84,6 +87,20 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
 - HA-Taktung ist über einen `interval: 60s`-Block entkoppelt, gesteuert durch die
   Number-Entity `Messintervall`. Sichtbare Sensoren stehen auf `update_interval: never`.
 - Filterkette: `median` (5 Werte) → `sliding_window_moving_average` (12 × 5 s ≈ 60 s).
+- **Das Messintervall ist zugleich das Mittelungsfenster (seit 11.08.2026).** Jeder
+  gefilterte Rohwert (alle 5 s) und jeder Temperaturwert (alle 60 s) läuft in
+  Summen-Globals; beim Veröffentlichen entstehen daraus `mittel_rohwert`,
+  `mittel_streuung`, `mittel_temperatur`, und **alle** Entities rechnen gegen diese
+  drei — nie mehr direkt gegen `hx711_raw_counts`. Bei 6 h gehen ~4.300 Werte in eine
+  Zahl ein statt 12; simulierte Reststreuung 2,2 g → 0,1 g. Details im
+  [Sessionbericht 11.08.](docs/sessionbericht-2026-08-11.md).
+- **Momentanwert statt Fenster** liefern: "Jetzt messen", Tara, beide Kalibrier-Buttons,
+  ein Intervallwechsel und der erste Wert nach dem Durchsicht-Nachlauf. Alle rufen
+  dafür das Skript `messfenster_frisch` auf, das das laufende Fenster verwirft.
+- **Die Temperatur muss über dasselbe Fenster gemittelt werden** wie der Rohwert. Mit
+  der Temperatur des Sendezeitpunkts zu korrigieren kostet bei 6 h Intervall ~98 g
+  und sieht dabei plausibel aus. Dafür die Diagnose-Entity "Temperatur Mittel";
+  "Temperatur" selbst bleibt der Momentanwert im 60-s-Takt.
 - Minutenzähler statt `millis()`, weil `millis()` nach ~49 Tagen überläuft.
 - **Der Minutenzähler wird zurückgesetzt von: jedem Neustart, "Jetzt messen", einer
   Änderung des Messintervalls und dem Ende des Durchsicht-Nachlaufs.** Das sieht
@@ -112,6 +129,18 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   aussehender Anzeige. Erkennungszeichen dafuer: "Kalibriert bei" ist leer.
   Seit der Kompensation haengt daran mehr als frueher — ohne "Kalibriert bei"
   fehlt der Bezugspunkt und die Kompensation schaltet sich stumm ab.
+- **Warum das so ist (11.08.2026 im Quelltext nachgesehen,
+  `esphome/components/esp8266/preferences.cpp`, 2026.6.5):** Der Speicherplatz
+  eines `restore_value`-Globals ergibt sich aus der **Reihenfolge** der
+  `make_preference()`-Aufrufe, nicht aus seinem Namen — der Namens-Hash geht nur
+  in die CRC ein. Ein neues Global mit `restore_value: yes` verschiebt deshalb
+  alles Nachfolgende, die CRC schlägt fehl und die Werte fallen auf
+  `initial_value` zurück. Ein Global mit `restore_value: no` fordert gar keinen
+  Speicher an und verschiebt nichts. **Konsequenz für neue Änderungen:** neue
+  Globals nach Möglichkeit `restore_value: no` geben. Die neun Globals der
+  Messfenster-Mittelung sind alle so angelegt — dieser Flash sollte die
+  Kalibrierung also nicht kosten. Abgeleitet aus dem Quelltext, nicht am Gerät
+  getestet: **trotzdem nach dem Flash prüfen.**
 - **GPIO16 (D0) ist der einzige Deep-Sleep-Weckpin** des ESP8266 (RTC-Timer zieht
   ihn auf Masse, muss deshalb an RST liegen). DOUT lag ursprünglich dort und hat
   Batteriebetrieb blockiert; **inzwischen auf D6 (GPIO12) umgezogen**, GPIO16 ist
@@ -144,12 +173,15 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   er ist eine Messgröße und muss am Zielstandort neu bestimmt werden — und jeder
   Flash kann die Kalibrierung mitnehmen.
 - **Der Rohwert bleibt unkompensiert**, sonst wäre er für eine Nachmessung wertlos.
+  Seit dem 11.08.2026 ist er ein Intervallmittel — für die Nachmessung ein Gewinn,
+  weil "Rohwert" und "Temperatur Mittel" denselben Zeitraum abdecken.
 - Neue Stöcke starten mit `0`. Der Wert von waage-eg gilt nur für dessen Aufbau.
 - Nicht kompensiert: Kriechen (−10,9 g/Tag, abklingend) und Gradienten zwischen den
   vier Zellen (kann ein einzelner Sensor prinzipiell nicht).
-- Prüfprogramm ohne Hardware: `tests/waage-temperatur-test.cpp` (`g++`, 4028 Prüfungen).
-  Bindet die echte Header-Datei ein, prüft also den ausgelieferten Code. Wer die
-  Lambdas in `waage-basis.yaml` ändert, muss den Nachbau dort mitziehen.
+- Prüfprogramm ohne Hardware: `tests/waage-temperatur-test.cpp` (`g++`, 4045 Prüfungen).
+  Bindet die echten Header-Dateien ein, prüft also den ausgelieferten Code. Wer die
+  Lambdas in `waage-basis.yaml` ändert, muss den Nachbau dort mitziehen — seit dem
+  11.08. gilt das auch für die Filterkette und das Messfenster (Punkt 10).
 - **Reserve, bewusst nicht eingebaut:** Glättet man die Temperatur vor der
   Verrechnung mit τ ≈ 90 min, fällt die Reststreuung von 15 g auf 8 g. Nicht
   gemacht, weil die Firmware mit dem *momentanen* Sensorwert rechnet — dazu
@@ -302,7 +334,9 @@ Bienenstockwaage/
 │                                       #   Codedatei. Wird nicht direkt geflasht.
 ├── packages/waage-temperatur.h        # Formel der Temperaturkompensation, einmal
 │                                       #   statt dreimal (esphome: includes:)
-├── tests/waage-temperatur-test.cpp    # Prueft ebendiese Formel mit g++, ohne Hardware
+├── packages/waage-mittelwert.h        # Mittelwert + Streuung des Messfensters,
+│                                       #   ebenfalls per esphome: includes:
+├── tests/waage-temperatur-test.cpp    # Prueft beide Header mit g++, ohne Hardware
 ├── waage-eg.yaml                      # Stock 1: nur substitutions + package-Include
 ├── waage-stock2.yaml                  # Stock 2, dito
 ├── waage-stock3.yaml                  # Stock 3, dito
@@ -420,8 +454,9 @@ Gegenprobe mit Ohmmeter: E+/E− und A+/A− müssen etwa gleich sein (~1 kΩ).
   Kompensation eingebaut und aktiv.
 - **Nach dem Umzug in den Garten neu bestimmen.** Vorgehen: konstante Last auflegen,
   Messintervall auf 15–60 min, `Bienen: Messintervall nach Saison` vorübergehend
-  ausschalten, mindestens fünf Tage laufen lassen, dann Rohwert gegen Temperatur
-  fitten — **mit einem Zeitglied als zweitem Term**, sonst schiebt das Kriechen den
+  ausschalten, mindestens fünf Tage laufen lassen, dann Rohwert gegen
+  **"Temperatur Mittel"** fitten (nicht gegen "Temperatur" — seit dem 11.08. ist der
+  Rohwert ein Intervallmittel und passt zeitlich nur zum Temperaturmittel) — **mit einem Zeitglied als zweitem Term**, sonst schiebt das Kriechen den
   Koeffizienten nach oben. Einzeltage taugen nicht (streuten zwischen 23 und 35 g/K).
 
 **Deep Sleep / Batteriebetrieb (Zielaufbau: Garten, Solar, NiMH 2600 mAh):**

@@ -13,6 +13,7 @@ weitere Stöcke ohne Code-Duplizierung dazukommen (siehe
 | [`CLAUDE.md`](CLAUDE.md) | Kurzanleitung für Claude Code: Prüfbefehle, Architektur, harte Regeln. Wird bei jeder Session automatisch geladen |
 | [`packages/waage-basis.yaml`](packages/waage-basis.yaml) | Die gesamte gemeinsame Logik - der eigentliche Code. Wird nicht direkt geflasht |
 | [`packages/waage-temperatur.h`](packages/waage-temperatur.h) | Die Formel der Temperaturkompensation, an einer Stelle statt an dreien |
+| [`packages/waage-mittelwert.h`](packages/waage-mittelwert.h) | Mittelwert und Streuung des Messfensters, aus demselben Grund ausgelagert |
 | [`waage-eg.yaml`](waage-eg.yaml) | Stock 1 "Waage eG": nur substitutions + package-Include |
 | [`waage-stock2.yaml`](waage-stock2.yaml) | Stock 2, gleiche Bauart |
 | [`waage-stock3.yaml`](waage-stock3.yaml) | Stock 3, gleiche Bauart |
@@ -23,6 +24,7 @@ weitere Stöcke ohne Code-Duplizierung dazukommen (siehe
 | [`docs/sessionbericht-2026-08-03.md`](docs/sessionbericht-2026-08-03.md) | Temperaturdrift ausgewertet, Durchsichtmodus, Kalibrierungsverlust |
 | [`docs/sessionbericht-2026-08-04.md`](docs/sessionbericht-2026-08-04.md) | Umstellung auf substitutions/packages, Namensschema, ESPHome-Fallstricke |
 | [`docs/sessionbericht-2026-08-10.md`](docs/sessionbericht-2026-08-10.md) | Temperaturkompensation: Auswertung über 7 Tage und Einbau |
+| [`docs/sessionbericht-2026-08-11.md`](docs/sessionbericht-2026-08-11.md) | Mittelung der Rohwerte über das Messintervall, zwei neue Diagnose-Entities |
 | [`tests/waage-temperatur-test.cpp`](tests/waage-temperatur-test.cpp) | Prüfprogramm für die Kompensationsformel (`g++`, ohne Hardware) |
 
 `secrets.yaml` selbst ist per `.gitignore` ausgeschlossen und gehört nicht ins Repo.
@@ -63,6 +65,10 @@ Details zur Verdrahtung und zum Rest der Deep-Sleep-Vorbereitung:
 - Gewicht in **kg**, gerundet auf **0,1 kg**
 - **Messintervall frei einstellbar aus Home Assistant** (1 Minute bis 7 Tage),
   Voreinstellung 360 min = 6 h
+- **Mittelung über das ganze Messintervall** — veröffentlicht wird nicht eine
+  Momentaufnahme, sondern der Mittelwert aller Rohwerte seit der letzten
+  Messung (bei 6 h rund 4.300 Werte). Ein längeres Intervall misst dadurch
+  auch genauer. Siehe unten
 - **Zwei-Punkt-Kalibrierung per Button aus HA** - kein festes `calibrate_linear`
   im YAML, die Kalibrierwerte liegen in `globals` mit `restore_value: yes` und
   überleben einen Neustart
@@ -232,10 +238,53 @@ Erlaubt ist alles von **1** bis **10080** (7 Tage). Die Änderung greift sofort:
 der Zähler startet neu und es wird direkt einmal gemessen, damit du in HA
 siehst, dass die Einstellung angekommen ist. Der Wert überlebt einen Neustart.
 
-Der HX711 selbst misst unabhängig davon weiter im Sekundentakt - das Intervall
-steuert nur, wie oft ein Wert **nach Home Assistant** geschickt wird. Ein
-kurzes Intervall kostet also keine zusätzliche Messgenauigkeit und ein langes
-verschlechtert sie nicht.
+### Das Intervall ist auch das Mittelungsfenster
+
+Seit dem 11.08.2026 ist der veröffentlichte Wert **der Mittelwert aller
+Rohwerte seit der letzten Messung** — nicht mehr eine Momentaufnahme. Der HX711
+liefert alle 5 Sekunden einen gefilterten Wert; bei 6 Stunden Intervall gehen
+also rund 4.300 Werte in eine Zahl ein statt der 12, die im 60-Sekunden-Fenster
+der Filterkette stecken.
+
+**Ein längeres Intervall misst damit auch genauer.** Simulation der echten
+Filterkette mit 300 counts Rauschen je Sekundenwert
+([`tests/waage-temperatur-test.cpp`](tests/waage-temperatur-test.cpp), Punkt
+10), angegeben ist die Reststreuung bei konstanter Last:
+
+| Intervall | vorher (Momentanwert) | jetzt (Fenstermittel) |
+|---|---|---|
+| 1 min | 2,1 g | 1,9 g |
+| 15 min | 2,2 g | 0,6 g |
+| 60 min | 2,1 g | 0,3 g |
+| 360 min | 2,2 g | 0,1 g |
+
+Bei 1 Minute bringt es fast nichts — dort *ist* das Intervall schon das
+Filterfenster. Der Gewinn wächst mit der Wurzel aus der Zahl der Werte und ist
+ab etwa einer Viertelstunde deutlich.
+
+Das ist gegenüber den übrigen Fehlerquellen (Kalibrierung, Kriechen,
+Temperaturrest ~15 g) klein — die Mittelung macht die Waage nicht auf 0,1 g
+genau, sie nimmt nur den Rauschanteil praktisch vollständig heraus. Sichtbar
+wird das vor allem in der **Tagesbilanz**, wo sich zwei verrauschte Messwerte
+sonst zu doppeltem Rauschen addieren.
+
+Zwei Nebenwirkungen, die man kennen sollte:
+
+- **Der Messwert ist ein Mittel über den ganzen Zeitraum, kein "jetzt".** Bei
+  6 h Intervall liegt sein Schwerpunkt drei Stunden in der Vergangenheit. Für
+  Trends und Tagesbilanzen ist das richtig; wer einen Momentanwert braucht,
+  drückt "Jetzt messen" (der liefert weiterhin den Momentanwert).
+- Auch die **Temperatur** wird über dasselbe Fenster gemittelt, sonst würde die
+  Kompensation ein 6-Stunden-Mittel mit der Temperatur des Sendezeitpunkts
+  korrigieren. Der Fehler dabei wäre nicht klein: in derselben Simulation
+  **97,7 g** bei 6 h Intervall. Dafür gibt es die Diagnose-Entity
+  "Temperatur Mittel"; die Entity "Temperatur" bleibt der Momentanwert im
+  60-Sekunden-Takt.
+
+Während einer **Durchsicht** und im Nachlauf danach wird nichts gesammelt — die
+abgestellte Zarge landet also nicht anteilig im nächsten Mittelwert. Auch
+**Tarieren und Kalibrieren** verwerfen das laufende Fenster, weil die bis dahin
+gesammelten Werte gegen eine andere Rechnung entstanden sind.
 
 ### "Die Werte aktualisieren sich so langsam"
 
@@ -244,7 +293,10 @@ Stockwaage ist das richtig, beim Einrichten stört es.
 
 - **Einzelner Wert jetzt:** Button **"Waage eG Jetzt messen"** drücken. Er
   veröffentlicht Gewicht und alle Diagnose-Entities sofort und startet den
-  Intervall-Zähler neu. Das Intervall selbst bleibt unverändert.
+  Intervall-Zähler neu. Das Intervall selbst bleibt unverändert. Er liefert
+  bewusst den **Momentanwert**, kein Fenstermittel — wer gerade etwas
+  aufgelegt hat, will nicht das Mittel der letzten Stunden sehen. "Rohwert
+  Streuung" bleibt dabei entsprechend stehen.
 - **Dauerhaft schneller zum Testen:** "Waage eG Messintervall" auf `1` stellen,
   danach wieder hochsetzen.
 - **Am schnellsten:** das ESPHome-Log. Der HX711-Treiber loggt **jede Sekunde**
@@ -352,6 +404,7 @@ Bezugspunkt und es wird **bewusst nicht** kompensiert.
 |---|---|
 | `number.<stock>_temperaturkoeffizient` | Der Koeffizient in **g/K**. Einstellbar, `0` = Kompensation aus |
 | `sensor.<stock>_temperaturkorrektur` | Was gerade abgezogen wird, in kg. Diagnose |
+| `sensor.<stock>_temperatur_mittel` | Die Temperatur, mit der gerechnet wurde: Mittel über dasselbe Messfenster wie der Rohwert. Diagnose |
 
 **Warum der Koeffizient aus HA einstellbar ist und nicht im YAML steht:** Er
 ist eine Messgröße, keine Konstante. Er hängt an diesen vier Zellen, an dieser
@@ -366,7 +419,8 @@ aus dem Stock kommt oder aus der Rechnung. Steht dort dauerhaft 0,000, ist die
 Kompensation aus.
 
 **Der Rohwert bleibt unkompensiert.** "Rohwert" ist und bleibt der nackte
-HX711-Zählwert. Nur so lässt sich der Koeffizient später gegen neue Daten
+HX711-Zählwert (seit dem 11.08.2026 über das Messintervall gemittelt, aber
+nicht korrigiert). Nur so lässt sich der Koeffizient später gegen neue Daten
 nachprüfen — ein bereits korrigierter Wert wäre für eine Nachmessung wertlos.
 
 ### Den Koeffizienten für einen neuen Stock bestimmen
@@ -381,10 +435,16 @@ plausibel aussieht.
 2. Messintervall auf `15` oder `60` stellen und **mindestens fünf Tage**
    laufen lassen. Die Automation `Bienen: Messintervall nach Saison` dabei
    ausschalten, sonst überschreibt sie das Intervall nachts um 3 Uhr.
-3. "Rohwert" gegen "Temperatur" auftragen und eine Gerade durchlegen —
-   **mit einem Zeitglied als zweitem Term**. Ohne das schiebt das Kriechen der
-   Zellen den Koeffizienten nach oben (im 2-Tage-Datensatz vom 03.08. um
-   5 g/K, im 7-Tage-Datensatz um knapp 5 g/K).
+3. "Rohwert" gegen **"Temperatur Mittel"** auftragen und eine Gerade
+   durchlegen — **mit einem Zeitglied als zweitem Term**. Ohne das schiebt das
+   Kriechen der Zellen den Koeffizienten nach oben (im 2-Tage-Datensatz vom
+   03.08. um 5 g/K, im 7-Tage-Datensatz um knapp 5 g/K).
+
+   > **Nicht "Temperatur" nehmen.** Seit der Rohwert ein Intervallmittel ist,
+   > passt der Momentanwert von "Temperatur" zeitlich nicht mehr dazu; die
+   > Regression käme zu flach heraus. "Temperatur Mittel" deckt exakt
+   > denselben Zeitraum ab wie der Rohwert. Für Datensätze von **vor** dem
+   > 11.08.2026 gilt umgekehrt weiter "Temperatur".
 4. Steigung in g/K in die Number eintragen. Kontrolle: "Temperaturkorrektur"
    muss sich über den Tag sichtbar bewegen, das Gewicht bei konstanter Last
    dagegen nicht mehr.
@@ -481,13 +541,28 @@ unkritisch; die real gemessenen ~26.700 counts bei leerer Waage ergeben rund
 Stock den Wandler in die Sättigung fahren; dann A+/A− tauschen und neu
 kalibrieren.
 
-**2. "Waage eG Rohwert"** — der gefilterte HX711-Zählwert. Bei **unbelasteter,
-ruhender** Waage sollte der über Minuten nur um einige hundert counts wandern.
-Springt er um Tausende, liegt es an der Hardware und nicht an dieser
-Konfiguration: Verkabelung, Wackelkontakt in der Junction-Box, Halbbrücken-
-statt Vollbrückenzellen, oder eine zu schwache Speisung (siehe
+**2. "Waage eG Rohwert Streuung"** — die Standardabweichung der Rohwerte
+innerhalb des Messintervalls, in counts. Das ist der Nachfolger der alten
+Faustregel "springt der Rohwert um Tausende, liegt es an der Hardware": Seit
+"Rohwert" ein Intervallmittel ist, sieht er auch dann ruhig aus, wenn das
+Signal wild springt — diese Entity zeigt es trotzdem.
+
+Bei **unbelasteter, ruhender** Waage und kurzem Intervall sollten hier einige
+hundert counts stehen (bei −20.874 counts/kg sind 200 counts rund 10 g).
+Deutlich mehr, ohne dass Wind, Durchsicht oder ein Wetterwechsel dahinterstehen,
+heißt Hardware und nicht Konfiguration: Verkabelung, Wackelkontakt in der
+Junction-Box, Halbbrücken- statt Vollbrückenzellen, oder eine zu schwache
+Speisung (siehe
 [`docs/waegezellen-verkabelung.md`](docs/waegezellen-verkabelung.md), Abschnitt
 zum Eingangswiderstand).
+
+> **Bei langem Intervall ist ein hoher Wert normal.** Über 6 Stunden steckt der
+> Temperaturgang mit im Fenster und dominiert die Streuung; in der Simulation
+> ergeben 300 counts Rauschen plus 1 K/h Erwärmung zusammen rund 1.200 counts.
+> Zum Beurteilen der Hardware also entweder kurz aufs Intervall `1` gehen oder
+> die Entity über Tage mit sich selbst vergleichen.
+
+Am direktesten bleibt trotzdem das Log — siehe unten.
 
 **3. "Waage eG Kalibriert mit"** — das Referenzgewicht, mit dem tatsächlich
 kalibriert wurde. Steht hier 0,5 obwohl du mit 10 kg kalibriert hast, wurde der

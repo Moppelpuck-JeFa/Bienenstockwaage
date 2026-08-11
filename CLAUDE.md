@@ -51,9 +51,11 @@ diff vorher.txt nachher.txt
 Damit lässt sich belegen, dass Entity-Namen und Globals unangetastet bleiben.
 Das ANSI-Entfernen ist nötig, sonst rauscht der Diff über maskierte Secrets.
 
-Der g++-Test bindet die **echte** Header-Datei aus `packages/` ein, prüft also
-den ausgelieferten Code. Die Lambda-Körper aus `waage-basis.yaml` sind dort
-nachgebaut — wer sie ändert, muss den Nachbau mitziehen.
+Der g++-Test bindet die **echten** Header-Dateien aus `packages/` ein
+(`waage-temperatur.h`, `waage-mittelwert.h`), prüft also den ausgelieferten
+Code. Die Lambda-Körper aus `waage-basis.yaml` sind dort nachgebaut — wer sie
+ändert, muss den Nachbau mitziehen. Das gilt auch für die Filterkette und das
+Messfenster, die Punkt 10 für die Genauigkeitsaussage simuliert.
 
 ## Architektur
 
@@ -81,8 +83,27 @@ Filterkette (Median 5 → gleitender Mittelwert ~60 s), damit Kalibrier- und
 Tara-Buttons immer einen frischen, eingeschwungenen Wert lesen. Alle in HA
 sichtbaren Sensoren stehen auf `update_interval: never`; veröffentlicht wird
 ausschließlich aus einem `interval: 60s`-Block, gesteuert von der Number-Entity
-„Messintervall". Wer einen neuen Sensor ergänzt, muss ihn dort **und** in den
-Buttons mit aktualisieren, sonst bleibt er nach einem Neustart leer.
+„Messintervall".
+
+**Das Messintervall ist zugleich das Mittelungsfenster.** Jeder gefilterte
+Rohwert (alle 5 s) und jeder Temperaturwert (alle 60 s) läuft in Summen-Globals
+(`fenster_*`, `temp_fenster_*`); beim Veröffentlichen werden daraus
+`mittel_rohwert`, `mittel_streuung` und `mittel_temperatur`. **Alle Entities
+rechnen gegen diese drei Globals, nie mehr direkt gegen `hx711_raw_counts`.**
+Wer das umgeht, veröffentlicht einen Wert aus einem anderen Zeitraum als der
+Rest. Die Rechnung steht in `packages/waage-mittelwert.h`.
+
+Daraus folgen drei Regeln:
+
+- **Ein neuer Sensor gehört ins Skript `messwerte_veroeffentlichen`** — dort
+  steht die Liste jetzt genau einmal (vorher dreimal, und regelmäßig blieb eine
+  Stelle zurück; der Sensor war dann nach einem Neustart dauerhaft leer).
+- **Rohwert und Temperatur müssen über dasselbe Fenster gemittelt werden.** Ein
+  6-h-Mittel mit der Temperatur des Sendezeitpunkts zu korrigieren kostet
+  ~98 g (Simulation, `tests/`, Punkt 10) und sieht dabei völlig plausibel aus.
+- **Alles, was die Grundlage der Messung ändert, verwirft das Fenster** —
+  Tara, beide Kalibrier-Buttons, Intervallwechsel, Durchsicht. Dafür gibt es
+  `messfenster_frisch`, das zugleich auf den Momentanwert umschaltet.
 
 **Kalibrierung lebt in `globals`** mit `restore_value`, nicht in
 `calibrate_linear`. Zwei-Punkt-Kalibrierung über Buttons aus HA.
@@ -124,6 +145,16 @@ deshalb ist sie mit g++ testbar.
 Im Zweifel **beide** Kalibrierschritte fahren, nicht nur den Referenzpunkt.
 Auslöser ist typischerweise ein Flash, der ein neues `globals`-Element
 mitbringt; `restore_from_flash` schützt dagegen nicht.
+
+Genauer, aus `esphome/components/esp8266/preferences.cpp` (2026.6.5): Der
+Speicherplatz eines `restore_value`-Globals ergibt sich aus der **Reihenfolge**
+der `make_preference()`-Aufrufe, nicht aus seinem Namen. Ein neues Global mit
+`restore_value: yes` verschiebt deshalb alles, was danach kommt — die CRC
+schlägt fehl und die Werte fallen auf `initial_value` zurück. Ein Global mit
+`restore_value: no` fordert gar keinen Speicher an und ist damit unkritisch.
+Das erklärt beide Vorfälle und ist der Grund, warum neue Globals nach Möglichkeit
+`restore_value: no` bekommen sollten. **Trotzdem nach jedem Flash prüfen** —
+die Ableitung stammt aus dem Quelltext, nicht aus einem Test am Gerät.
 
 ## Wo was steht
 

@@ -90,6 +90,9 @@ esphome:
   # beim Kopieren ins Add-on-Verzeichnis muss packages/ also mit.
   includes:
     - packages/waage-temperatur.h
+    # Mittelwert und Streuung des Messfensters, aus demselben Grund ausgelagert
+    # wie die Temperaturformel: reine Zahlen, kein id(), mit g++ pruefbar.
+    - packages/waage-mittelwert.h
 
 esp8266:
   board: ${board}
@@ -214,6 +217,72 @@ globals:
     restore_value: no
     initial_value: '0'
 
+  # ---------------------------------------------------------------------
+  # Messfenster: laufende Summen zwischen zwei Veroeffentlichungen
+  # ---------------------------------------------------------------------
+  # Bis zum 11.08.2026 ging der Momentanwert der Filterkette nach HA - ein
+  # Mittel ueber 60 s, egal ob das Messintervall 1 Minute oder 6 Stunden war.
+  # Die uebrigen 359 Minuten Messdaten wurden verworfen. Jetzt wird JEDER
+  # Rohwert des Intervalls aufsummiert und beim Veroeffentlichen gemittelt:
+  # bei 6 h sind das rund 4.300 Werte statt 12, das Rauschen sinkt um Wurzel(N).
+  #
+  # Alle bewusst OHNE restore_value: ein angefangenes Fenster ueber einen
+  # Neustart hinweg fortzusetzen hiesse, Werte von vor und nach dem Neustart
+  # zu vermengen - und genau dazwischen kann ein Flash die Kalibrierung
+  # gewechselt haben. Nach einem Neustart faengt das Fenster neu an.
+  #
+  # Summiert wird gegen fenster_bezug (den ersten Wert des Fensters), damit die
+  # Quadratsumme klein bleibt - Begruendung in packages/waage-mittelwert.h.
+  - id: fenster_bezug
+    type: double
+    restore_value: no
+    initial_value: '0.0'
+  - id: fenster_summe
+    type: double
+    restore_value: no
+    initial_value: '0.0'
+  - id: fenster_quadratsumme
+    type: double
+    restore_value: no
+    initial_value: '0.0'
+  - id: fenster_anzahl
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  # Dasselbe fuer die Temperatur. Sie MUSS ueber dasselbe Fenster gemittelt
+  # werden wie der Rohwert: die Kompensation ist linear, deshalb ist
+  # mittel(kg) - k*(mittel(T) - T0) exakt das Mittel der Einzelkorrekturen.
+  # Wuerde der 6-h-Mittelwert dagegen mit der Temperatur des Sendezeitpunkts
+  # korrigiert, zoege die Kompensation den Tagesgang wieder hinein, statt ihn
+  # herauszurechnen - und zwar unbemerkt, weil das Ergebnis plausibel bleibt.
+  # Ein Bezugswert ist hier unnoetig, Temperaturen werden nicht gross.
+  - id: temp_fenster_summe
+    type: double
+    restore_value: no
+    initial_value: '0.0'
+  - id: temp_fenster_anzahl
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+
+  # Ergebnis des zuletzt abgeschlossenen Fensters - das, was veroeffentlicht
+  # wird. Alle Entities rechnen gegen DIESE drei Werte, nicht mehr direkt gegen
+  # hx711_raw_counts. Dadurch zeigen Gewicht, Rohwert und Temperaturkorrektur
+  # garantiert denselben Messzeitraum; frueher waren sie schon deshalb
+  # konsistent, weil es nur einen Momentanwert gab.
+  - id: mittel_rohwert
+    type: float
+    restore_value: no
+    initial_value: 'NAN'
+  - id: mittel_streuung
+    type: float
+    restore_value: no
+    initial_value: 'NAN'
+  - id: mittel_temperatur
+    type: float
+    restore_value: no
+    initial_value: 'NAN'
+
 # --- 1-Wire-Bus für den Temperatursensor ---
 # DS18B20 an D5 (GPIO14). D1/D2 sind vom HX711 belegt, D4 wäre GPIO2 und
 # damit ein Boot-Strapping-Pin - deshalb D5.
@@ -242,12 +311,14 @@ sensor:
     clk_pin: ${pin_hx711_clk}
     gain: 128
     # WICHTIG: Der HX711 wird bewusst SCHNELL abgefragt (1s), auch wenn der
-    # Messwert in HA nur alle paar Stunden erscheinen soll. Grund: Die
-    # Filterkette unten braucht laufend frische Rohwerte, und die Kalibrier-/
-    # Tara-Buttons lesen den gefilterten Zustand dieses Sensors im Moment des
-    # Drückens. Bei einem langsamen Rohintervall wäre dieser Wert nie aktuell.
-    # Die Taktung nach HA passiert ausschließlich über den interval:-Block
-    # ganz unten, gesteuert durch die Number-Entity "Messintervall".
+    # Messwert in HA nur alle paar Stunden erscheinen soll. Drei Gründe:
+    # die Filterkette unten braucht laufend frische Rohwerte, die Kalibrier-
+    # und Tara-Buttons lesen den gefilterten Zustand im Moment des Drückens,
+    # und seit dem 11.08.2026 geht JEDER dieser Werte ins Messfenster ein, aus
+    # dem der veröffentlichte Wert gemittelt wird. Genau daher kommt der
+    # Genauigkeitsgewinn: bei 6 h Intervall mitteln rund 4.300 Werte statt 12.
+    # Die Taktung nach HA passiert weiterhin ausschließlich über den
+    # interval:-Block ganz unten, gesteuert durch die Number "Messintervall".
     update_interval: 1s
     filters:
       # 1) Ausreißer (Spikes) rausfiltern, bevor überhaupt gemittelt wird.
@@ -264,6 +335,29 @@ sensor:
           send_first_at: 1
       # KEINE calibrate_linear hier - die Kalibrierung passiert dynamisch
       # weiter unten über die beiden Kalibrier-Buttons.
+    on_value:
+      # Jeden gefilterten Wert (alle 5 s) ins laufende Messfenster legen.
+      # Aufsummiert wird der Wert NACH der Filterkette, nicht der Sekundenwert:
+      # der Median hat die Spikes dann schon entfernt, und ein einzelner
+      # Ausreisser soll den Intervallmittelwert nicht mitziehen.
+      - lambda: |-
+          // Waehrend Durchsicht und Nachlauf NICHT sammeln. Diese Werte sind
+          // keine Messung des Stocks (Zarge abgestellt, Hand am Rahmen), und
+          // im Mittelwert waeren sie hinterher nicht mehr herauszurechnen -
+          // anders als bisher, wo sie schlicht nicht veroeffentlicht wurden.
+          if (id(durchsicht_restminuten) > 0 || id(nachlauf_minuten) > 0) {
+            return;
+          }
+          if (std::isnan(x)) {
+            return;
+          }
+          if (id(fenster_anzahl) == 0) {
+            id(fenster_bezug) = x;
+          }
+          double abweichung = (double) x - id(fenster_bezug);
+          id(fenster_summe) += abweichung;
+          id(fenster_quadratsumme) += abweichung * abweichung;
+          id(fenster_anzahl)++;
 
   # Das ist der Sensor, den du in Home Assistant siehst - live aus den
   # beiden Kalibrierpunkten berechnet, temperaturkompensiert, Tara abgezogen,
@@ -281,7 +375,10 @@ sensor:
     # der interval:-Block unten oder ein Button update() aufruft.
     update_interval: never
     lambda: |-
-      float raw = id(hx711_raw_counts).state;
+      // Gerechnet wird gegen den Mittelwert des abgelaufenen Messfensters,
+      // nicht gegen den Momentanwert der Filterkette. Wer diesen Wert setzt,
+      // steht beim Skript "messfenster_abschliessen".
+      float raw = id(mittel_rohwert);
       // Solange der HX711 noch keinen gefilterten Wert geliefert hat
       // (direkt nach dem Boot), lieber gar nichts veröffentlichen
       if (std::isnan(raw)) {
@@ -298,7 +395,11 @@ sensor:
       // das +32,5 g/K (die Waage zeigt bei Wärme zu viel). Bezugspunkt ist die
       // beim Nullpunkt festgehaltene Temperatur - dort ist die Korrektur null.
       // Die Formel steht in packages/waage-temperatur.h.
-      kg -= waage_temperaturkorrektur(id(letzte_temperatur),
+      //
+      // Gerechnet wird mit der MITTLEREN Temperatur desselben Messfensters -
+      // ein ueber 6 h gemitteltes Gewicht mit der Temperatur des
+      // Sendezeitpunkts zu korrigieren waere schlicht falsch.
+      kg -= waage_temperaturkorrektur(id(mittel_temperatur),
                                       id(calib_temp),
                                       id(temp_koeffizient).state);
       kg -= id(tare_offset);
@@ -340,6 +441,15 @@ sensor:
       - lambda: |-
           if (!std::isnan(x)) {
             id(letzte_temperatur) = x;
+            // Ins Messfenster, mit derselben Sperre wie der Rohwert: waehrend
+            // einer Durchsicht gehoert auch die Temperatur nicht ins Mittel,
+            // sonst passten Rohwert- und Temperaturfenster nicht mehr
+            // zueinander und die Kompensation rechnete gegen den falschen
+            // Zeitraum.
+            if (id(durchsicht_restminuten) == 0 && id(nachlauf_minuten) == 0) {
+              id(temp_fenster_summe) += x;
+              id(temp_fenster_anzahl)++;
+            }
           } else {
             ESP_LOGW("waage", "DS18B20 lieferte keinen Wert - Kompensation "
                               "rechnet mit %.2f C weiter",
@@ -347,22 +457,93 @@ sensor:
           }
 
   # --- Diagnose ---
-  # Der gefilterte HX711-Rohwert, so wie ihn die Buttons und die Umrechnung
-  # sehen. Der wichtigste Wert zur Fehlersuche: springt der schon ohne Last
-  # um Tausende counts, liegt es an Hardware/Verkabelung/Stromversorgung -
-  # nicht an der Umrechnung.
+  # Der HX711-Rohwert, gemittelt über das abgelaufene Messintervall - genau der
+  # Wert, aus dem oben das Gewicht gerechnet wurde.
+  #
+  # Er bleibt UNKOMPENSIERT. Nur so laesst sich der Temperaturkoeffizient
+  # spaeter gegen neue Daten nachpruefen; fuer diese Nachmessung ist die
+  # Mittelung sogar ein Gewinn, weil Rohwert und "Temperatur Mittel" jetzt
+  # denselben Zeitraum abdecken statt zweier zufaelliger Momentaufnahmen.
   - platform: template
     id: rohwert
     name: "Rohwert"
     icon: "mdi:counter"
     unit_of_measurement: "counts"
-    accuracy_decimals: 0
+    # Eine Nachkommastelle, seit hier gemittelt wird: bei ~20.900 counts/kg
+    # sind 0,1 counts rund 5 mg - die Stelle ist also weit unterhalb jeder
+    # Messgenauigkeit und dient nur dazu, die Mittelung ueberhaupt sichtbar zu
+    # machen. Ohne sie saehe ein ruhiges Fenster aus wie ein Momentanwert.
+    accuracy_decimals: 1
     # Für die Driftanalyse: so bekommt der Rohwert eine Langzeitstatistik
     # und lässt sich über Wochen gegen die Temperatur auftragen.
     state_class: measurement
     entity_category: diagnostic
     update_interval: never
-    lambda: 'return id(hx711_raw_counts).state;'
+    lambda: 'return id(mittel_rohwert);'
+
+  # Streuung der Rohwerte innerhalb des Messfensters (Standardabweichung).
+  #
+  # Der Preis der Mittelung: ein gemittelter Rohwert sieht auch dann ruhig aus,
+  # wenn das Signal wild springt. Vorher war das die WICHTIGSTE Information zur
+  # Fehlersuche - "springt der Rohwert schon ohne Last um Tausende counts, liegt
+  # es an Hardware/Verkabelung/Stromversorgung". Dieser Wert ersetzt sie und
+  # macht sie sogar belastbarer, weil er ueber das ganze Intervall geht statt
+  # ueber den Moment, in dem man gerade hinschaut.
+  #
+  # ACHTUNG BEIM LESEN: Das ist die Streuung ALLER Einfluesse im Fenster, nicht
+  # nur des Rauschens - bei langem Intervall steckt der Temperaturgang mit
+  # drin, und zwar dominant. In der Simulation (tests/, Punkt 10) liefern
+  # 300 counts Rauschen und 1 K/h Erwaermung ueber 6 h zusammen rund
+  # 1.200 counts Streuung; das Rauschen allein waere ein Viertel davon.
+  # Ein hoher Wert bei 6 h Intervall ist also normal. Aussagekraeftig wird die
+  # Entity im Vergleich mit sich selbst: springt sie ohne Anlass (Wind,
+  # Durchsicht, Wetterwechsel) auf ein Vielfaches, ist etwas an der Hardware.
+  # Zur Umrechnung: bei ~20.900 counts/kg sind 200 counts rund 10 g.
+  - platform: template
+    id: rohwert_streuung
+    name: "Rohwert Streuung"
+    icon: "mdi:sine-wave"
+    unit_of_measurement: "counts"
+    accuracy_decimals: 0
+    state_class: measurement
+    entity_category: diagnostic
+    update_interval: never
+    lambda: |-
+      // Bei Messungen ohne Fenster (Buttons, erster Wert nach dem Boot) gibt
+      // es keine Streuung. Dann bewusst NICHTS veroeffentlichen statt einer
+      // 0 - eine 0 hiesse "voellig rauschfrei" und waere eine Falschaussage.
+      if (std::isnan(id(mittel_streuung))) {
+        return {};
+      }
+      return id(mittel_streuung);
+
+  # Mittlere Temperatur desselben Messfensters - der Partner des Rohwerts.
+  #
+  # BRAUCHT MAN FUER DIE NACHMESSUNG DES KOEFFIZIENTEN: Dafuer wird "Rohwert"
+  # gegen "Temperatur" aufgetragen. Seit der Rohwert ein Intervallmittel ist,
+  # passt der Momentanwert von "Temperatur" nicht mehr dazu - man wuerde ein
+  # 6-h-Mittel gegen eine Momentaufnahme regressieren und einen zu flachen
+  # Koeffizienten herausbekommen. Dieses Paar hier passt zeitlich exakt
+  # zusammen.
+  #
+  # Die Entity "Temperatur" bleibt unveraendert im 60-s-Takt: die dichte
+  # Temperaturreihe ist unabhaengig davon nuetzlich, und herunterrechnen kann
+  # man sie spaeter immer, verdichten nicht.
+  - platform: template
+    id: temperatur_mittel
+    name: "Temperatur Mittel"
+    icon: "mdi:thermometer-lines"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    device_class: temperature
+    state_class: measurement
+    entity_category: diagnostic
+    update_interval: never
+    lambda: |-
+      if (std::isnan(id(mittel_temperatur))) {
+        return {};
+      }
+      return id(mittel_temperatur);
 
   # counts pro kg aus der aktuellen Kalibrierung. Erwartungswert bei 4x50kg
   # sind grob 18000. Steht hier etwas völlig anderes (z. B. 3500 oder ein
@@ -405,7 +586,7 @@ sensor:
     entity_category: diagnostic
     update_interval: never
     lambda: |-
-      return waage_temperaturkorrektur(id(letzte_temperatur),
+      return waage_temperaturkorrektur(id(mittel_temperatur),
                                        id(calib_temp),
                                        id(temp_koeffizient).state);
 
@@ -497,9 +678,13 @@ binary_sensor:
             - script.execute: durchsicht_starten
 
 # --- Virtueller Tara-Button + Kalibrier-Buttons ---
-# Die Kalibrier- und Tara-Buttons lesen direkt den gefilterten Zustand von
-# hx711_raw_counts. Der ist dank 1s-Abfrage immer aktuell (max. 5s alt),
-# aber über ~60s gemittelt. Deshalb gilt fuer alle drei:
+# Alle drei arbeiten mit dem MOMENTANWERT der Filterkette, nicht mit dem
+# Messfenster-Mittel: sie beziehen sich auf das, was gerade auf der Waage
+# liegt. Erzwungen wird das ueber "messfenster_frisch", das jeder von ihnen
+# als erste Aktion aufruft.
+#
+# Der Momentanwert ist dank 1s-Abfrage immer aktuell (max. 5s alt), aber ueber
+# ~60s gemittelt. Deshalb gilt fuer alle drei unveraendert:
 # erst auflegen/abraeumen, dann ~1 Minute warten, DANN druecken.
 button:
   # Erzwingt sofort eine Veröffentlichung an HA, ohne auf das eingestellte
@@ -511,15 +696,16 @@ button:
     name: "Jetzt messen"
     icon: "mdi:refresh"
     on_press:
+      # Bewusst der MOMENTANWERT, nicht das bisher gesammelte Fenster: Wer
+      # diesen Button drueckt, will wissen, was gerade auf der Waage liegt -
+      # typischerweise nach dem Auflegen eines Gewichts. Ein Mittel ueber die
+      # letzten Stunden waere dafuer die falsche Antwort und saehe zudem aus
+      # wie ein Fehler ("ich habe doch gerade 5 kg draufgestellt").
+      # Entsprechend zeigt "Rohwert Streuung" danach keinen neuen Wert an.
+      - script.execute: messfenster_frisch
+      - script.execute: messwerte_veroeffentlichen
       - lambda: |-
           id(minuten_seit_messung) = 0;
-          id(waage_gewicht).update();
-          id(waage_uptime).update();
-          id(rohwert).update();
-          id(kalibrierfaktor).update();
-          id(kalibriert_mit).update();
-          id(kalibriert_bei).update();
-          id(temperaturkorrektur).update();
           // Der DS18B20 laeuft zwar ohnehin im 60s-Takt, aber "Jetzt messen"
           // soll wirklich alles frisch machen
           id(temperatur).update();
@@ -531,8 +717,14 @@ button:
     name: "Tara"
     icon: "mdi:scale-balance"
     on_press:
+      # Tara gilt ab JETZT. Das laufende Fenster stammt aus der Zeit davor und
+      # wuerde den naechsten Mittelwert um den halben Tara-Betrag verfaelschen -
+      # also verwerfen und mit dem Momentanwert weiterrechnen. Nebeneffekt und
+      # Absicht zugleich: die Anzeige steht danach sofort sauber auf 0,0 kg,
+      # weil Tara und Anzeige denselben Rohwert benutzen.
+      - script.execute: messfenster_frisch
       - lambda: |-
-          float raw = id(hx711_raw_counts).state;
+          float raw = id(mittel_rohwert);
           if (std::isnan(raw)) {
             ESP_LOGW("waage", "Tara ignoriert: noch kein HX711-Messwert");
             return;
@@ -546,7 +738,7 @@ button:
             // Gewicht zurück - die Waage stünde nach dem Tarieren zwar auf
             // null, liefe über den Tag aber um den vollen Temperaturhub weg.
             float korrektur = waage_temperaturkorrektur(
-                id(letzte_temperatur), id(calib_temp),
+                id(mittel_temperatur), id(calib_temp),
                 id(temp_koeffizient).state);
             id(tare_offset) = brutto - korrektur;
             ESP_LOGI("waage", "Tara gesetzt: %.3f kg (roh %.1f, "
@@ -564,8 +756,12 @@ button:
     name: "Kalibrieren 0kg"
     icon: "mdi:target"
     on_press:
+      # Wie beim Tara: die im laufenden Fenster gesammelten Rohwerte sind gegen
+      # die ALTE Kalibrierung entstanden und haben im naechsten Mittelwert
+      # nichts zu suchen.
+      - script.execute: messfenster_frisch
       - lambda: |-
-          float raw = id(hx711_raw_counts).state;
+          float raw = id(mittel_rohwert);
           if (std::isnan(raw)) {
             ESP_LOGW("waage", "Kalibrierung 0kg ignoriert: kein Messwert");
             return;
@@ -605,8 +801,13 @@ button:
     name: "Kalibrieren Referenzgewicht"
     icon: "mdi:target"
     on_press:
+      # Siehe "Kalibrieren 0kg": laufendes Fenster verwerfen, Momentanwert
+      # nehmen. Hier zusaetzlich wichtig, weil im Fenster die Zeit VOR dem
+      # Auflegen des Referenzgewichts steckt - der Span kaeme sonst zu klein
+      # heraus und der Kalibrierfaktor waere still verkehrt.
+      - script.execute: messfenster_frisch
       - lambda: |-
-          float raw = id(hx711_raw_counts).state;
+          float raw = id(mittel_rohwert);
           if (std::isnan(raw)) {
             ESP_LOGW("waage", "Kalibrierung ignoriert: kein Messwert");
             return;
@@ -690,11 +891,14 @@ number:
     mode: box
     on_value:
       # Neue Einstellung sofort wirksam machen und einmal messen,
-      # damit man in HA direkt sieht, dass die Änderung angekommen ist
+      # damit man in HA direkt sieht, dass die Änderung angekommen ist.
+      # Das laufende Fenster wird dabei verworfen: es gehörte zum alten
+      # Intervall, und ein halb volles Fenster als erster Wert des neuen wäre
+      # eine Mischung aus beidem.
+      - script.execute: messfenster_frisch
+      - script.execute: messwerte_veroeffentlichen
       - lambda: |-
           id(minuten_seit_messung) = 0;
-          id(waage_gewicht).update();
-          id(waage_uptime).update();
           ESP_LOGI("waage", "Messintervall auf %.0f min gesetzt", x);
 
   # Temperaturkoeffizient der Wägezellen in g/K.
@@ -734,7 +938,10 @@ number:
       # Sofort sichtbar machen, was die neue Zahl bewirkt - sonst müsste man
       # bei 6 h Messintervall einen halben Tag warten, um zu sehen, ob man
       # sich vertippt hat. Der Intervallzähler läuft dabei bewusst WEITER:
-      # das hier ist eine Einstellung, keine planmäßige Messung.
+      # das hier ist eine Einstellung, keine planmäßige Messung. Aus demselben
+      # Grund wird das Messfenster NICHT abgeschlossen - die beiden Entities
+      # unten rechnen den zuletzt veröffentlichten Messwert mit dem neuen
+      # Koeffizienten nach, und genau das will man hier sehen.
       - lambda: |-
           ESP_LOGI("waage", "Temperaturkoeffizient auf %.1f g/K gesetzt "
                             "(Bezugstemperatur %.2f C)", x, id(calib_temp));
@@ -798,6 +1005,88 @@ switch:
 # wird: vom Taster am Stock und vom Schalter in HA. Doppelte Logik waere hier
 # die klassische Quelle fuer "am Taster geht es, in HA nicht".
 script:
+  # --- Messfenster abschliessen ---
+  # Rechnet die laufenden Summen in die drei mittel_*-Globals um und faengt ein
+  # neues Fenster an. Danach - und nur danach - duerfen die Entities aktualisiert
+  # werden; sie lesen ausschliesslich diese Globals.
+  #
+  # Ist das Fenster LEER, wird der Momentanwert der Filterkette genommen. Das
+  # ist kein Notbehelf, sondern der normale Weg fuer alles, was nicht am
+  # Intervall haengt: Tara, Kalibrieren, "Jetzt messen" und der erste Wert nach
+  # einer Durchsicht wollen den Zustand JETZT, nicht ein Mittel ueber die
+  # letzten Stunden. Die Buttons erzwingen den Fall ueber "messfenster_frisch".
+  - id: messfenster_abschliessen
+    mode: single
+    then:
+      - lambda: |-
+          if (id(fenster_anzahl) > 0) {
+            id(mittel_rohwert) = waage_fenster_mittelwert(
+                id(fenster_bezug), id(fenster_summe), id(fenster_anzahl));
+            id(mittel_streuung) = waage_fenster_streuung(
+                id(fenster_summe), id(fenster_quadratsumme), id(fenster_anzahl));
+          } else {
+            id(mittel_rohwert) = id(hx711_raw_counts).state;
+            id(mittel_streuung) = NAN;
+          }
+          if (id(temp_fenster_anzahl) > 0) {
+            id(mittel_temperatur) = waage_fenster_mittelwert(
+                0.0, id(temp_fenster_summe), id(temp_fenster_anzahl));
+          } else {
+            id(mittel_temperatur) = id(letzte_temperatur);
+          }
+          // Die Anzahl gehoert ins Log, nicht nach HA: sie beantwortet die
+          // Frage "hat die Waage das Intervall wirklich durchgemessen?", und
+          // genau die stellt sich nur bei der Fehlersuche. Der Cast auf
+          // unsigned haelt printf und uint32_t auf allen Plattformen zusammen.
+          ESP_LOGI("waage", "Messfenster: %u Rohwerte -> %.1f counts "
+                            "(Streuung %.1f), %u Temperaturwerte -> %.2f C",
+                   (unsigned) id(fenster_anzahl), id(mittel_rohwert),
+                   id(mittel_streuung), (unsigned) id(temp_fenster_anzahl),
+                   id(mittel_temperatur));
+          // Neues Fenster. Bezug und Summen werden beim ersten Wert ohnehin
+          // neu gesetzt, entscheidend sind die beiden Zaehler.
+          id(fenster_bezug) = 0.0;
+          id(fenster_summe) = 0.0;
+          id(fenster_quadratsumme) = 0.0;
+          id(fenster_anzahl) = 0;
+          id(temp_fenster_summe) = 0.0;
+          id(temp_fenster_anzahl) = 0;
+
+  # --- Laufendes Fenster verwerfen und den Momentanwert nehmen ---
+  # Fuer alles, was die Grundlage der Messung veraendert: nach dem Tarieren
+  # oder Kalibrieren sind die gesammelten Rohwerte gegen eine andere Rechnung
+  # entstanden und duerfen nicht in den naechsten Mittelwert einfliessen.
+  - id: messfenster_frisch
+    mode: single
+    then:
+      - lambda: |-
+          id(fenster_anzahl) = 0;
+          id(temp_fenster_anzahl) = 0;
+          id(messfenster_abschliessen).execute();
+
+  # --- Alles nach HA schicken ---
+  # Bewusst an EINER Stelle: die Liste wird vom Taktgeber, vom Nachlauf nach der
+  # Durchsicht und vom Button "Jetzt messen" gebraucht. Stand sie dreimal da,
+  # blieb beim Ergaenzen eines Sensors regelmaessig eine Stelle zurueck - der
+  # Sensor war dann nach einem Neustart dauerhaft leer, ohne dass etwas
+  # fehlerhaft aussah. Wer einen Sensor ergaenzt, traegt ihn nur noch hier ein.
+  #
+  # Vorher muss immer ein Messfenster abgeschlossen worden sein, sonst
+  # veroeffentlicht das hier den vorigen Wert noch einmal.
+  - id: messwerte_veroeffentlichen
+    mode: single
+    then:
+      - lambda: |-
+          id(waage_gewicht).update();
+          id(waage_uptime).update();
+          id(rohwert).update();
+          id(rohwert_streuung).update();
+          id(temperatur_mittel).update();
+          id(kalibrierfaktor).update();
+          id(kalibriert_mit).update();
+          id(kalibriert_bei).update();
+          id(temperaturkorrektur).update();
+
   - id: durchsicht_starten
     mode: restart
     then:
@@ -826,7 +1115,12 @@ script:
 
 # --- Taktgeber für die Veröffentlichung an Home Assistant ---
 # Läuft jede Minute und zählt hoch. Ist das eingestellte Intervall erreicht,
-# werden Gewicht und Betriebszeit veröffentlicht und der Zähler beginnt neu.
+# wird das Messfenster abgeschlossen (= alle seither gesammelten Rohwerte
+# gemittelt), das Ergebnis veröffentlicht und der Zähler beginnt neu.
+#
+# Das Intervall bestimmt damit nicht mehr nur, wie OFT gesendet wird, sondern
+# auch, ueber wie lange gemittelt wird - ein langes Intervall ist seit dem
+# 11.08.2026 also genauer, nicht nur sparsamer.
 interval:
   - interval: 60s
     then:
@@ -836,6 +1130,10 @@ interval:
           // Auch die Diagnose-Entities bleiben stehen: der Rohwert waehrend
           // einer Manipulation ist keine Messung, und er hat state_class
           // measurement - er landet also dauerhaft in der Langzeitstatistik.
+          //
+          // Dass waehrenddessen auch nichts ins Messfenster gesammelt wird,
+          // steht am on_value des HX711 und des DS18B20 - hier zu sperren
+          // reichte nicht, die Werte laufen im 5-s-Takt auf.
           if (id(durchsicht_restminuten) > 0) {
             id(durchsicht_restminuten)--;
             if (id(durchsicht_restminuten) == 0) {
@@ -858,13 +1156,13 @@ interval:
             }
             ESP_LOGI("waage", "Nachlauf beendet - erster Wert nach der Durchsicht");
             id(minuten_seit_messung) = 0;
-            id(waage_gewicht).update();
-            id(waage_uptime).update();
-            id(rohwert).update();
-            id(kalibrierfaktor).update();
-            id(kalibriert_mit).update();
-            id(kalibriert_bei).update();
-            id(temperaturkorrektur).update();
+            // Momentanwert statt Fenster: waehrend Durchsicht und Nachlauf
+            // wurde nichts gesammelt, und was noch vom Fenster VOR der
+            // Durchsicht uebrig ist, gehoert zu einem anderen Stockzustand -
+            // eine abgenommene Honigzarge steckte sonst zur Haelfte im ersten
+            // Wert danach.
+            id(messfenster_frisch).execute();
+            id(messwerte_veroeffentlichen).execute();
             return;
           }
 
@@ -906,15 +1204,16 @@ interval:
 
           if (id(minuten_seit_messung) >= soll || noch_kein_wert) {
             id(minuten_seit_messung) = 0;
-            id(waage_gewicht).update();
-            id(waage_uptime).update();
+            // Der planmäßige Fall - und der einzige, in dem ein volles
+            // Messfenster zusammenkommt. Erst abschließen (das setzt die
+            // mittel_*-Globals und startet das nächste Fenster), dann
+            // veröffentlichen; die Reihenfolge ist zwingend, sonst ginge der
+            // vorige Messwert ein zweites Mal nach HA.
+            //
             // Sorgt nebenbei dafür, dass die Diagnose-Entities nach einem
-            // Neustart überhaupt einen Wert bekommen
-            id(rohwert).update();
-            id(kalibrierfaktor).update();
-            id(kalibriert_mit).update();
-            id(kalibriert_bei).update();
-            id(temperaturkorrektur).update();
+            // Neustart überhaupt einen Wert bekommen.
+            id(messfenster_abschliessen).execute();
+            id(messwerte_veroeffentlichen).execute();
           }
 
   # Signalisierung des Durchsichtmodus.
