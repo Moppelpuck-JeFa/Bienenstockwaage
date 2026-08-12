@@ -121,7 +121,7 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   3 Minuten, legt die Waage aber nicht still.
 
 ### Plausibilitätsfenster des Gewichts (seit 12.08.2026)
-- Veröffentlicht wird nur, was **zwischen 0 und 150 kg** liegt
+- Veröffentlicht wird nur, was **zwischen −1 und 150 kg** liegt
   (`plausibel_kg_min`/`plausibel_kg_max` als substitutions, Regel in
   `packages/waage-grenzen.h`). Alles andere wird **verworfen, nicht gekappt**.
 - **Der Grund ist die Langzeitstatistik.** `state_class: measurement` heißt:
@@ -147,10 +147,12 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   und nimmt das arithmetische Mittel der Töpfe** — wer Statistikzeilen
   nachrechnet, muss das treffen, sonst schreibt er still falsche Geschichte.
   Einzelne Statistikzeilen löschen kann HA nicht.
-- Preis der Untergrenze 0: eine frisch tarierte Waage kann nicht mehr −0,1 kg
-  anzeigen. Simuliert in `tests/` (Punkt 11): 0,01 % der Werte bei einem Stock
-  auf 0,0 kg, ab 0,1 kg Last keine. Für eine Driftmessung mit leerer Waage
-  `plausibel_kg_min: "-5"` setzen.
+- **Die Untergrenze liegt bewusst bei −1 kg, nicht bei 0.** Zuerst war 0
+  gesetzt; das schnitt aber das Rauschen einer frisch tarierten Waage auf
+  halber Höhe ab (−0,1 kg ist dort ein echter Messwert) und hätte den
+  Mittelwert unsichtbar nach oben gezogen. Simuliert in `tests/` (Punkt 11):
+  mit −1 wird bis zu einem Stock bei −0,9 kg nichts verworfen. Für eine
+  Driftmessung mit leerer Waage `plausibel_kg_min: "-5"` setzen.
 
 ### Kritische Plattform-Fallstricke (ESP8266 / ESPHome)
 - **`restore_from_flash: true` ist ZWINGEND.** Ohne diese Zeile landen alle
@@ -215,7 +217,7 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
 - Neue Stöcke starten mit `0`. Der Wert von waage-eg gilt nur für dessen Aufbau.
 - Nicht kompensiert: Kriechen (−10,9 g/Tag, abklingend) und Gradienten zwischen den
   vier Zellen (kann ein einzelner Sensor prinzipiell nicht).
-- Prüfprogramm ohne Hardware: `tests/waage-temperatur-test.cpp` (`g++`, 4045 Prüfungen).
+- Prüfprogramm ohne Hardware: `tests/waage-temperatur-test.cpp` (`g++`, 4079 Prüfungen).
   Bindet die echten Header-Dateien ein, prüft also den ausgelieferten Code. Wer die
   Lambdas in `waage-basis.yaml` ändert, muss den Nachbau dort mitziehen — seit dem
   11.08. gilt das auch für die Filterkette und das Messfenster (Punkt 10).

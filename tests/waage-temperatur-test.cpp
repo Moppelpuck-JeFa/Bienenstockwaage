@@ -509,17 +509,26 @@ int main() {
   std::printf("\n== 11. Plausibilitaetsfenster des Gewichts ==\n");
   {
     // Die Grenzen aus den substitutions von waage-basis.yaml.
-    const float unten = 0.0f, oben = 150.0f;
+    const float unten = -1.0f, oben = 150.0f;
 
     // --- Die Regel selbst ---
-    pruefe("0,0 kg ist plausibel (Grenze einschliesslich)",
-           waage_gewicht_plausibel(0.0f, unten, oben), 1.0, 0.5);
+    pruefe("-1,0 kg ist plausibel (Grenze einschliesslich)",
+           waage_gewicht_plausibel(-1.0f, unten, oben), 1.0, 0.5);
     pruefe("150,0 kg ist plausibel (Grenze einschliesslich)",
            waage_gewicht_plausibel(150.0f, unten, oben), 1.0, 0.5);
+    pruefe("0,0 kg ist plausibel",
+           waage_gewicht_plausibel(0.0f, unten, oben), 1.0, 0.5);
     pruefe("35,8 kg (Istwert waage-eg) ist plausibel",
            waage_gewicht_plausibel(35.8f, unten, oben), 1.0, 0.5);
-    pruefe("-0,1 kg faellt heraus",
-           waage_gewicht_plausibel(-0.1f, unten, oben), 0.0, 0.5);
+    // Das Rauschen einer frisch tarierten Waage MUSS durchkommen. Eine
+    // Grenze bei exakt 0 hat genau hier abgeschnitten und damit den
+    // Mittelwert nach oben gezogen - unsichtbar in der Statistik.
+    for (float nahe_null : {-0.1f, -0.2f, -0.5f, -0.9f}) {
+      pruefe("Rauschen um die Null nach dem Tara kommt durch",
+             waage_gewicht_plausibel(nahe_null, unten, oben), 1.0, 0.5);
+    }
+    pruefe("-1,1 kg faellt heraus",
+           waage_gewicht_plausibel(-1.1f, unten, oben), 0.0, 0.5);
     pruefe("150,1 kg faellt heraus",
            waage_gewicht_plausibel(150.1f, unten, oben), 0.0, 0.5);
     pruefe("NAN faellt heraus",
@@ -556,18 +565,27 @@ int main() {
                veroeffentlichtes_gewicht(v, raw, unten, oben), 30.0f, 0.051f);
       }
 
-      // Der Grenzfall direkt nach einem Tara: -0,04 kg rundet auf -0,0 und
-      // wird schon in der Anzeige zu 0,0 - die Untergrenze sieht ihn also
-      // gar nicht. Erst ab -0,05 kg faellt der Wert wirklich aus.
+      // Die tarierte Waage: was sie um die Null herum anzeigt, geht
+      // vollstaendig nach HA. -0,04 kg rundet ohnehin schon in der Anzeige
+      // auf 0,0; ab -0,05 kg erscheint der negative Wert und wird jetzt
+      // auch veroeffentlicht.
       pruefe("-0,04 kg wird zu 0,0 und kommt durch",
              veroeffentlichtes_gewicht(w, roh_fuer(w, -0.04f, w.calib_temp),
                                        unten, oben), 0.0f, 1e-6f);
-      pruefe("-0,06 kg faellt aus (Preis der Untergrenze 0)",
+      pruefe("-0,06 kg kommt als -0,1 kg durch",
              veroeffentlichtes_gewicht(w, roh_fuer(w, -0.06f, w.calib_temp),
+                                       unten, oben), -0.1f, 1e-6f);
+      pruefe("-0,95 kg kommt noch durch",
+             veroeffentlichtes_gewicht(w, roh_fuer(w, -0.95f, w.calib_temp),
+                                       unten, oben), -1.0f, 1e-6f);
+      pruefe("-1,4 kg faellt aus",
+             veroeffentlichtes_gewicht(w, roh_fuer(w, -1.4f, w.calib_temp),
                                        unten, oben), NAN, 1e-6f);
-      pruefe("mit Untergrenze -5 kommt -0,1 kg wieder durch",
+      // Zum Vergleich die frueher gesetzte Grenze bei exakt 0: dort waere
+      // derselbe echte Messwert verschwunden.
+      pruefe("mit Untergrenze 0 waere -0,1 kg ausgefallen",
              veroeffentlichtes_gewicht(w, roh_fuer(w, -0.06f, w.calib_temp),
-                                       -5.0f, oben), -0.1f, 1e-6f);
+                                       0.0f, oben), NAN, 1e-6f);
 
       // Die halbe Kalibrierung - der Fall, der das Fenster ueberhaupt noetig
       // macht. Nullpunkt frisch gesetzt, Referenzpunkt noch der alte:
@@ -588,17 +606,20 @@ int main() {
              std::fabs(unsinn) > 1000.0f ? 1.0 : 0.0, 1.0, 0.5);
     }
 
-    // --- Was die Untergrenze im Normalbetrieb kostet ---
-    // Sie greift nur, wenn die Waage ohnehin um die Null steht (frisch
-    // tariert, nichts aufgelegt). Wie oft sie dort zuschlaegt, haengt am
-    // Rauschen des Fenstermittels: 14 g entsprechen 300 counts Rauschen je
-    // Sekundenwert, also dem, was Punkt 10 zugrunde legt - und das ist der
-    // ungefilterte Fall, ein 6-h-Mittel rauscht deutlich weniger.
+    // --- Was die Untergrenze kostet, und ab wann sie greift ---
+    // Die entscheidende Eigenschaft: sie darf das Rauschen einer frisch
+    // tarierten Waage NICHT anschneiden. Taete sie das, fiele nur die untere
+    // Haelfte weg und der Mittelwert wanderte nach oben - ein Fehler, den man
+    // der Statistik hinterher nicht ansieht.
+    //
+    // Gerechnet mit 14 g Streuung (= 300 counts Rauschen je Sekundenwert,
+    // dieselbe Annahme wie in Punkt 10) - und das ist der ungefilterte Fall,
+    // ein 6-h-Fenstermittel rauscht erheblich weniger.
     {
       std::mt19937 rng(20260812);
       const int zuege = 20000;
       std::printf("   Anteil verworfener Werte bei sigma = 14 g:\n");
-      for (double mittel : {0.0, 0.1, 0.5, 2.0}) {
+      for (double mittel : {0.0, -0.5, -0.9, -1.2}) {
         std::normal_distribution<double> rauschen(mittel, 0.014);
         int raus = 0;
         for (int i = 0; i < zuege; i++) {
@@ -607,11 +628,13 @@ int main() {
           if (std::fabs(gerundet) < 0.001f) gerundet = 0.0f;
           if (!waage_gewicht_plausibel(gerundet, unten, oben)) raus++;
         }
-        std::printf("     Stock bei %4.1f kg   %5.2f %%\n", mittel,
+        std::printf("     Stock bei %4.1f kg   %6.2f %%\n", mittel,
                     100.0 * raus / zuege);
-        if (mittel >= 0.1) {
-          pruefe("ab 0,1 kg Last verwirft die Untergrenze nichts mehr",
+        if (mittel >= -0.9) {
+          pruefe("bis -0,9 kg verwirft die Untergrenze nichts",
                  raus, 0.0, 0.5);
+        } else {
+          pruefe("unterhalb der Grenze faellt alles aus", raus, zuege, 0.5);
         }
       }
     }

@@ -87,13 +87,18 @@ substitutions:
   # aus dem Volk, sondern aus einer halben Kalibrierung, und sie stehen wegen
   # state_class: measurement dauerhaft in der Langzeitstatistik.
   #
-  # 0 kg unten: Ein Stock kann nicht weniger als nichts wiegen. ACHTUNG, das
-  # ist eine bewusste Einschraenkung - unmittelbar nach einem Tara rauscht die
-  # Anzeige um die Null, und -0,1 kg ist dort ein ECHTER Messwert. Der bleibt
-  # jetzt aus, die Entity haelt so lange ihren letzten Stand. Wer die
-  # Null-Umgebung sauber sehen will (Driftmessung mit tarierter Waage), setzt
-  # hier z. B. "-5". Werte zwischen -0,05 und 0 sind nicht betroffen: sie
-  # runden auf -0,0 und werden schon in der Anzeige zu 0,0.
+  # -1 kg unten: Ein Stock kann nicht weniger als nichts wiegen, die Grenze
+  # liegt aber bewusst EIN KILO darunter. Grund ist das Tara: direkt danach
+  # rauscht die Anzeige um die Null, und -0,1 kg ist dort ein ECHTER Messwert.
+  # Eine Grenze bei exakt 0 wuerde die untere Haelfte dieses Rauschens
+  # abschneiden und den Mittelwert damit nach oben ziehen - ein Fehler, den
+  # man der Statistik nicht ansieht. Das eine Kilo Luft laesst die Messung
+  # heil und faengt trotzdem alles, was aus einer kaputten Kalibrierung kommt
+  # (die lag real bei -3.749 kg).
+  #
+  # Wer noch mehr Luft braucht - etwa fuer eine Driftmessung mit leerer,
+  # tarierter Waage, die ueber Tage in den negativen Bereich laufen kann -
+  # setzt hier z. B. "-5".
   #
   # 150 kg oben: Beute, Volk, Honig und Futter zusammen bleiben deutlich
   # darunter (4x50 kg Zellen, mechanisches Limit 200 kg). Der Wert ist
@@ -101,7 +106,7 @@ substitutions:
   # Volk in der Tracht.
   #
   # plausibel_kg_max <= plausibel_kg_min schaltet die Pruefung ganz ab.
-  plausibel_kg_min: "0"
+  plausibel_kg_min: "-1"
   plausibel_kg_max: "150"
 
 esphome:

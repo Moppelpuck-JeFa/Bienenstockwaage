@@ -109,7 +109,7 @@ Daraus folgen drei Regeln:
 `calibrate_linear`. Zwei-Punkt-Kalibrierung über Buttons aus HA.
 
 **Das Gewicht läuft vor dem Veröffentlichen durch ein Plausibilitätsfenster**
-(`plausibel_kg_min`/`plausibel_kg_max`, Vorgabe 0 bis 150 kg; Regel in
+(`plausibel_kg_min`/`plausibel_kg_max`, Vorgabe −1 bis 150 kg; Regel in
 `packages/waage-grenzen.h`). Der Grund ist nicht Kosmetik: `waage_gewicht` hat
 `state_class: measurement`, ein Ausreißer steht damit **dauerhaft** in der
 Langzeitstatistik, während der Zustandsverlauf nach ~10 Tagen wegfällt. Am
@@ -123,9 +123,11 @@ auf +70,8 kg. Daraus folgt:
 - **Der Taktgeber fragt `erste_messung_erfolgt`, nicht mehr
   `isnan(waage_gewicht.state)`.** Sonst käme er bei dauerhaft unplausiblen
   Werten nie aus dem Anlauf und schlösse jede Minute ein Messfenster ab.
-- Die Untergrenze 0 kostet die echten −0,1-kg-Werte einer frisch tarierten
-  Waage. Belegt in `tests/`, Punkt 11: 0,01 % der Werte bei einem Stock auf
-  0,0 kg, ab 0,1 kg Last gar keine.
+- **Die Untergrenze liegt bei −1 kg, nicht bei 0.** Nach einem Tara rauscht
+  die Anzeige um die Null; eine Grenze bei 0 schnitte die untere Hälfte ab und
+  zöge den Mittelwert nach oben, ohne dass man es der Statistik ansieht.
+  Belegt in `tests/`, Punkt 11: bis zu einem Stock bei −0,9 kg wird nichts
+  verworfen.
 
 **Die Temperaturkompensation steht in `packages/waage-temperatur.h`** — genau
 einmal, weil sie an drei Stellen gebraucht wird (Gewicht, Tara,

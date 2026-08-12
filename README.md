@@ -80,7 +80,7 @@ Details zur Verdrahtung und zum Rest der Deep-Sleep-Vorbereitung:
   Temperatur; an "Waage eG" gemessene **+32,5 g/K** werden aus dem Gewicht
   herausgerechnet. Der Koeffizient ist aus HA einstellbar, `0` schaltet die
   Kompensation ab. Siehe unten.
-- **Plausibilitätsfenster 0 bis 150 kg** — was außerhalb liegt, geht gar nicht
+- **Plausibilitätsfenster −1 bis 150 kg** — was außerhalb liegt, geht gar nicht
   erst nach Home Assistant. Solche Werte kommen nie aus dem Volk, sondern aus
   einer halben Kalibrierung, und sie stünden sonst dauerhaft in der
   Langzeitstatistik. Der Zähler „Gewicht verworfen" macht sichtbar, dass es
@@ -481,7 +481,7 @@ und funktioniert mit und ohne Kompensation.
 
 ## Plausibilitätsfenster: was gar nicht erst nach HA geht
 
-Die Waage veröffentlicht ein Gewicht nur, wenn es **zwischen 0 und 150 kg**
+Die Waage veröffentlicht ein Gewicht nur, wenn es **zwischen −1 und 150 kg**
 liegt. Alles andere wird verworfen — die Entity „Gewicht" behält dann ihren
 letzten guten Wert, und der Zähler „Gewicht verworfen" zählt eins hoch.
 
@@ -512,21 +512,25 @@ Stock in dessen Datei überschreiben:
 
 ```yaml
 substitutions:
-  plausibel_kg_min: "0"
+  plausibel_kg_min: "-1"
   plausibel_kg_max: "150"
 ```
 
 `plausibel_kg_max` kleiner oder gleich `plausibel_kg_min` **schaltet die Prüfung
 ab** (dann geht alles außer NAN durch).
 
-**Die Untergrenze 0 hat einen Preis, und der ist Absicht:** Steht die Waage
-frisch tariert bei null, ist −0,1 kg ein *echter* Messwert — und der bleibt
-jetzt aus. Werte zwischen −0,05 und 0 sind nicht betroffen, die runden schon in
-der Anzeige auf 0,0. Wie oft es bei 14 g Rauschen wirklich zuschlägt, rechnet
-das Prüfprogramm aus (Punkt 11): bei einem Stock auf 0,0 kg rund **0,01 %** der
-Werte, ab 0,1 kg Last **gar keine**. Wer die Null-Umgebung sauber sehen will —
-etwa für eine Driftmessung mit leerer, tarierter Waage — setzt
-`plausibel_kg_min: "-5"`.
+**Warum die Untergrenze bei −1 liegt und nicht bei 0.** Ein Stock kann zwar
+nicht weniger als nichts wiegen, aber direkt nach einem Tara rauscht die
+Anzeige um die Null — und dort ist −0,1 kg ein *echter* Messwert. Eine Grenze
+bei exakt 0 würde die untere Hälfte dieses Rauschens abschneiden und den
+Mittelwert damit nach oben ziehen; das sieht man der Statistik hinterher nicht
+an. Das Kilo Luft lässt die Messung heil und fängt trotzdem alles, was aus
+einer kaputten Kalibrierung kommt — die lag real bei −3.749 kg.
+
+Das Prüfprogramm rechnet es durch (Punkt 11, 14 g Rauschen): bis zu einem
+Stock, der bei **−0,9 kg** steht, verwirft die Untergrenze **nichts**. Wer noch
+mehr Luft braucht — etwa für eine Driftmessung mit leerer, tarierter Waage, die
+über Tage ins Negative laufen kann — setzt `plausibel_kg_min: "-5"`.
 
 ### „Gewicht verworfen" lesen
 
@@ -541,7 +545,7 @@ Der Zähler beginnt nach jedem Neustart wieder bei 0 und hat bewusst **keine**
 Warum ein Wert verworfen wurde, steht mit Rohwert im Log:
 
 ```
-[W][waage]: Gewicht -2311.7 kg verworfen - ausserhalb von 0.0..150.0 kg
+[W][waage]: Gewicht -2311.7 kg verworfen - ausserhalb von -1.0..150.0 kg
             (Kalibrierung pruefen! roh -599434.0, 1. Mal seit dem Neustart)
 ```
 

@@ -69,7 +69,8 @@ Zwei Festlegungen stecken darin:
 
 ### `packages/waage-basis.yaml`
 
-- **Neue substitutions** `plausibel_kg_min: "0"` und `plausibel_kg_max: "150"`.
+- **Neue substitutions** `plausibel_kg_min: "-1"` und `plausibel_kg_max: "150"`
+  (zur Untergrenze siehe Abschnitt 3).
   Pro Stock überschreibbar. Compile-Zeit-Konstanten, bewusst **keine**
   Number-Entity: eine Number mit `restore_value: true` fordert Speicherplatz
   in den Preferences an und würde beim Flash die Kalibrierung kosten.
@@ -113,36 +114,45 @@ Nachmessung des Temperaturkoeffizienten.
 
 ---
 
-## 3. Der Preis der Untergrenze 0
+## 3. Die Untergrenze: erst 0, dann −1
 
-Das ist die einzige Stelle, an der das Fenster echte Messwerte kostet, und sie
-ist es wert, hier zu stehen:
+Zuerst stand die Untergrenze auf **0** — ein Stock kann nicht weniger als
+nichts wiegen. Das hatte einen Preis, der im Gespräch zur Änderung führte:
 
 **Eine frisch tarierte Waage kann nicht mehr −0,1 kg anzeigen.** Steht der
 Stock bei null und rauscht die Anzeige um die Null, fällt die untere Hälfte des
-Rauschens aus.
+Rauschens aus — und zwar nur die untere. Damit ist es kein bloßer Datenverlust,
+sondern ein **systematischer Fehler**: der Mittelwert wandert nach oben, und
+man sieht es der Statistik hinterher nicht an. Genau die Sorte Fehler, gegen
+die das Fenster eigentlich gebaut wurde.
 
-Zwei Dinge entschärfen das:
-
-- Werte zwischen −0,05 und 0 sind nicht betroffen. Sie runden auf −0,0 und
-  werden schon in der Anzeige zu 0,0 (die Zeile gab es vorher schon, sie sollte
-  „−0.0" in HA verhindern).
-- Im Betrieb liegt immer eine Beute auf. Die Untergrenze greift nur, wenn
-  jemand die Waage leer tariert hat.
+**Die Untergrenze steht deshalb jetzt auf −1 kg.** Das Kilo Luft lässt das
+Rauschen um die Null vollständig heil und fängt trotzdem alles, was aus einer
+kaputten Kalibrierung kommt — die lag real bei −3.749 kg, also drei
+Größenordnungen daneben. Zwischen „echter Messwert" und „Rechenfehler" liegt
+hier so viel Platz, dass die genaue Zahl unkritisch ist.
 
 Ausgerechnet in `tests/`, Punkt 11, bei 14 g Rauschen (= 300 counts je
 Sekundenwert, dieselbe Annahme wie in Punkt 10, und das ist der *ungefilterte*
 Fall — ein 6-h-Fenstermittel rauscht erheblich weniger):
 
-| Stock steht bei | verworfene Werte |
-|---|---|
-| 0,0 kg | 0,01 % |
-| 0,1 kg | 0 % |
-| 0,5 kg | 0 % |
-| 2,0 kg | 0 % |
+| Stock steht bei | verworfen mit Grenze 0 | verworfen mit Grenze −1 |
+|---|---|---|
+| 0,0 kg | 0,01 % | 0 % |
+| −0,5 kg | 100 % | 0 % |
+| −0,9 kg | 100 % | 0 % |
+| −1,2 kg | 100 % | 100 % |
 
-Wer die Null-Umgebung sauber sehen will — etwa für eine Driftmessung mit
-leerer, tarierter Waage — setzt in der Stock-Datei `plausibel_kg_min: "-5"`.
+Wer noch mehr Luft braucht — etwa für eine Driftmessung mit leerer, tarierter
+Waage, die über Tage ins Negative laufen kann — setzt in der Stock-Datei
+`plausibel_kg_min: "-5"`.
+
+> **Kleine Unstimmigkeit, die man kennen sollte:** Die Altlast in der
+> Langzeitstatistik (Abschnitt 5) wurde gegen **0** gefiltert, weil der Auftrag
+> so lautete und weil dort ausschließlich Kalibrier-Artefakte betroffen waren.
+> Künftig veröffentlicht die Waage aber ab −1 kg. In der Reihe kann also
+> irgendwann ein echter Wert von −0,3 kg stehen, während die alten −0,9 kg vom
+> August entfernt sind. Das ist so gewollt: die alten waren keine Messung.
 
 ---
 
@@ -171,7 +181,7 @@ cd tests
 g++ -std=c++17 -Wall -Wextra -O2 waage-temperatur-test.cpp -o test && ./test
 ```
 
-**4071 Prüfungen, 0 Fehler** (vorher 4045; Punkt 11 ist neu). Darin unter
+**4079 Prüfungen, 0 Fehler** (vorher 4045; Punkt 11 ist neu). Darin unter
 anderem die vier Ausreißer vom 11.08. als Testfälle und die Reproduktion der
 halben Kalibrierung: Span auf 600 counts geschrumpft (die Span-Prüfung im
 Kalibrier-Button greift ab 500 nicht mehr) → Anzeige **−2.311,7 kg** → wird
