@@ -518,6 +518,30 @@ richtig so und kein Fehler: Der erste Wert nach einem Neustart ist der
 Momentanwert der Filterkette, zu dem es kein Messfenster und damit keine
 Streuung gibt. Steht in der README unter „Rohwert Streuung".
 
+### Eine HA-Eigenheit, über die ich gestolpert bin
+
+Die Kachel „Gewicht verworfen" zeigte `0.0` statt `0`. Der naheliegende Weg —
+Anzeigegenauigkeit in den Entity-Einstellungen auf 0 setzen
+(`options.sensor.display_precision`) — **wirkte nicht**, obwohl die Registry
+den Wert übernahm.
+
+Der Vergleich auf derselben Kachelreihe erklärt es:
+
+| Entity | Einheit | `state_class` | Anzeige |
+|---|---|---|---|
+| Kalibrier-Sperre | `min` | keine | **0 min** |
+| Gewicht verworfen | keine | keine | **0.0** |
+
+**Home Assistant behandelt eine Entity nur dann als numerisch, wenn sie eine
+Einheit ODER eine `state_class` hat.** Ohne beides rendert das Frontend den
+Rohstring, und jede Einstellung zur Anzeigegenauigkeit läuft ins Leere.
+
+Eine `state_class` kommt für einen Zähler nicht in Frage — die legte ihn in
+die Langzeitstatistik, also genau dorthin, wo diese Session gerade
+aufgeräumt hat. Deshalb hat der Sensor die Einheit `Werte` bekommen. Das
+wirkt erst nach dem nächsten Flash; die Registry-Option bleibt gesetzt und
+verstärkt sie dann.
+
 ### Auf dem Dashboard
 
 Beide neuen Entities als Kacheln in die Technik-Ansicht zur übrigen Diagnose,
@@ -556,6 +580,7 @@ dann vor Augen, wenn sie gebraucht wird.
 - Offen aus den Vorsessions: Kalibrier-Sperre der Automation
   `Bienen: Futtervorrat kritisch` fehlt noch (weniger dringend, der
   Schwellwert löst erst nach 2 h Überschreitung aus).
-- Kosmetik: Die Kachel „Gewicht verworfen" zeigt `0.0` statt `0` — die Entity
-  hat keine Einheit, HA nimmt dann die Rohdarstellung. Über die
-  Anzeigegenauigkeit in den Entity-Einstellungen zu beheben.
+- **Ein zweiter Flash steht aus**, für eine Kleinigkeit: „Gewicht verworfen"
+  hat jetzt die Einheit `Werte` bekommen (Begründung unten). Bis zum Flash
+  zeigt die Kachel weiter `0.0`. Kein Grund, extra dafür zu flashen — beim
+  nächsten Mal mitnehmen.

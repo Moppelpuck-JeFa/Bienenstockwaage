@@ -411,6 +411,12 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   veröffentlicht HA denselben Wert erneut mit neuem Zeitstempel; ungefiltert
   waren das im 7-Tage-Datensatz 20 Scheinmesspunkte, alle rund um Neustarts
   gehäuft. Doppelte Werte verwerfen.
+- **Eine Entity ohne `unit_of_measurement` UND ohne `state_class` gilt in HA
+  nicht als numerisch.** Das Frontend rendert dann den Rohstring („0.0" statt
+  „0"), und die Anzeigegenauigkeit in den Entity-Einstellungen greift nicht —
+  am 12.08.2026 an „Gewicht verworfen" ausprobiert und wirkungslos. Abhilfe
+  ist eine Einheit (dort `Werte`); eine `state_class` wäre die falsche, weil
+  sie den Wert in die Langzeitstatistik legt.
 - `ha_eval_template` eignet sich, um eine Template-Bedingung **vor** dem
   Schreiben gegen die echten Entities zu testen — inklusive der Frage, was bei
   einer fehlenden Entity passiert.

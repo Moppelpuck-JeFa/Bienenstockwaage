@@ -790,6 +790,14 @@ sensor:
     id: gewicht_verworfen
     name: "Gewicht verworfen"
     icon: "mdi:filter-remove-outline"
+    # Die Einheit ist nicht Kosmetik, sondern noetig: Home Assistant behandelt
+    # eine Entity nur dann als numerisch, wenn sie eine Einheit ODER eine
+    # state_class hat. Ohne beides rendert das Frontend den Rohstring - der
+    # Zaehler stand als "0.0" auf dem Dashboard, und die Anzeigegenauigkeit in
+    # den Entity-Einstellungen half nicht (12.08.2026 ausprobiert). Eine
+    # state_class kommt nicht in Frage, die wuerde den Zaehler in die
+    # Langzeitstatistik legen - also die Einheit.
+    unit_of_measurement: "Werte"
     accuracy_decimals: 0
     entity_category: diagnostic
     update_interval: never
