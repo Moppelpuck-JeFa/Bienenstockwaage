@@ -139,6 +139,14 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   Minute** ein Messfenster ab.
 - Beide neuen Globals haben `restore_value: no` und sollten die Kalibrierung
   daher nicht kosten — **trotzdem nach dem Flash prüfen.**
+- **Die Altlast in der Statistik ist am 12.08.2026 bereinigt worden**: zwölf
+  belastete Stundenzeilen, neun aus den Rohdaten neu gerechnet, drei (03.08.,
+  Rohdaten weg) ersatzlos gestrichen. Weg: `recorder/clear_statistics` +
+  `recorder/import_statistics` über die ws-Schnittstelle, alle sauberen Zeilen
+  unverändert zurückgeschrieben. **HA mittelt je 5-Minuten-Topf zeitgewichtet
+  und nimmt das arithmetische Mittel der Töpfe** — wer Statistikzeilen
+  nachrechnet, muss das treffen, sonst schreibt er still falsche Geschichte.
+  Einzelne Statistikzeilen löschen kann HA nicht.
 - Preis der Untergrenze 0: eine frisch tarierte Waage kann nicht mehr −0,1 kg
   anzeigen. Simuliert in `tests/` (Punkt 11): 0,01 % der Werte bei einem Stock
   auf 0,0 kg, ab 0,1 kg Last keine. Für eine Driftmessung mit leerer Waage

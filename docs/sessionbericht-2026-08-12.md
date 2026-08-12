@@ -8,8 +8,9 @@ Das zerfällt in zwei Dinge, die nichts miteinander zu tun haben:
 1. **Dass keine neuen dazukommen** — eine Änderung an der Firmware. Erledigt,
    geprüft, in diesem Bericht beschrieben.
 2. **Die, die schon in der Langzeitstatistik stehen** — eine Änderung an der
-   Recorder-Datenbank von Home Assistant. Vollständig aufgenommen, aber
-   **nicht ausgeführt**; die Begründung steht unten unter „Die Altlast in der
+   Recorder-Datenbank von Home Assistant. Ebenfalls erledigt: zwölf belastete
+   Stundenzeilen sind weg, neun davon durch nachgerechnete ersetzt, drei
+   ersatzlos gestrichen. Ablauf und Prüfung unter „Die Altlast in der
    Statistik".
 
 ---
@@ -204,48 +205,103 @@ Unterschreitungen von 0, alle im Bereich −9,4 bis −0,9 kg, und alle stammen
 aus Kalibrier- oder Tara-Vorgängen — also genau aus den Sekunden, die das neue
 Fenster künftig auffängt.
 
-### Warum sie stehen geblieben sind
+### Das Werkzeugproblem
 
 Home Assistant hat **keine Schnittstelle, um einzelne Statistikzeilen zu
 löschen.** `recorder/clear_statistics` löscht die komplette Reihe eines
-Sensors (zwei Wochen brauchbarer Daten mit), `recorder.purge_entities` räumt
-nur den Zustandsverlauf auf und lässt die Statistik unberührt. Bleibt
-`recorder/import_statistics`: damit lassen sich bestehende Stundenzeilen
-**überschreiben** — löschen aber nicht.
+Sensors, `recorder.purge_entities` räumt nur den Zustandsverlauf auf und lässt
+die Statistik unberührt. `recorder/import_statistics` kann bestehende
+Stundenzeilen **überschreiben** — löschen aber nicht.
 
-Überschreiben heißt: die Zeile mit einem neu gerechneten Wert ersetzen. Dabei
-sind beim Nachrechnen zwei Dinge aufgefallen, die die Sache heikel machen:
+Gewählt wurde deshalb: **Reihe löschen und neu aufbauen**, aber so, dass nichts
+Sauberes dabei verloren geht. Alle 251 Stundenzeilen wurden vorher ausgelesen
+und gesichert; zurückgeschrieben wurden 248 (plus die inzwischen dazugekommene
+Zeile 04:00 UTC) — die unbelasteten unverändert, die neun reparierbaren neu
+gerechnet. Nur die drei vom 03.08. fehlen jetzt: für sie gibt es keine Rohdaten
+mehr, und eine erfundene Zahl wäre keine Bereinigung, sondern eine
+unauffälligere Falschaussage.
 
-1. **Home Assistant mittelt zeitgewichtet, nicht arithmetisch.** Nachgeprüft
-   an der Zeile 2026-08-10 12:00: der arithmetische Mittelwert der
-   aufgezeichneten Zustände ergibt 1,47, das Mittel der 5-Minuten-Töpfe 0,55 —
-   in der Datenbank steht 1,9944. Zeitgewichtet über die Stunde kommen
-   1,9947 heraus. Ein Nachbau muss also die Haltedauer jedes Zustands und den
-   aus der Vorstunde übernommenen Anfangszustand berücksichtigen, sonst
-   schreibt er still falsche Geschichte.
-2. **Für die drei Zeilen vom 03.08. gibt es keine Rohdaten mehr.** Der
-   Zustandsverlauf ist nach ~10 Tagen weg. Jeder Ersatzwert dafür wäre
-   erfunden.
+### Wie die neun Zeilen gerechnet wurden
 
-Eine Zeile mit einer erfundenen Zahl zu überschreiben ist keine Bereinigung,
-sondern eine unauffälligere Falschaussage — genau das, was oben schon gegen
-das Kappen spricht. Und weil ein Überschreiben der Statistik nicht rückgängig
-zu machen ist, ist das eine Entscheidung, die nicht nebenbei fallen sollte.
-Die Tabelle oben enthält deshalb bewusst die **alten** Werte: sie ist zugleich
-die Sicherung, falls überschrieben wird und es schiefgeht.
+Ein Nachbau, der die Statistik überschreibt, muss die Rechnung von Home
+Assistant **treffen** — sonst schreibt er still falsche Geschichte. Der Weg
+dahin über drei Versuche:
 
-### Die drei möglichen Wege
+| Modell | Ergebnis |
+|---|---|
+| arithmetisches Mittel der Zustände | 1,47 statt 1,9944 — falsch |
+| durchgehend zeitgewichtet über die Stunde | trifft 15 von 18 Kontrollstunden exakt, weicht bei Stunden mit `unavailable`-Lücken um bis zu 0,95 kg ab |
+| **je 5-Minuten-Topf zeitgewichtet, Stundenmittel = Mittel der Töpfe** | **trifft alle Kontrollstunden auf 0,0000 kg** |
 
-| Weg | Wirkung | Preis |
+Das dritte Modell ist also das, was HA tatsächlich tut, und der Unterschied
+zeigt sich genau dort, wo nicht jeder Topf gleich gut besetzt ist. Zwei
+Einzelheiten fielen dabei noch auf und stecken im Nachbau:
+
+- Der **Trägerzustand** aus der Vorstunde zählt mit — auch in Min und Max.
+  Belegt an der Stunde 09:00 UTC des 11.08., deren Minimum 23,8 kg ein Wert
+  von 10:55 Ortszeit der Vorstunde ist.
+- Eine `unavailable`/`unknown`-Lücke **hält den vorigen Wert**, sie fällt nicht
+  aus der Gewichtung heraus.
+
+Geprüft wurde gegen 18 Stunden, deren HA-Werte bekannt waren. Beim Filtern
+werden Intervalle mit Werten außerhalb 0…150 kg übersprungen, und ein
+verworfener Wert läuft danach auch nicht als Trägerwert weiter.
+
+### Was jetzt drinsteht
+
+| Stundenzeile (UTC) | alt | neu |
 |---|---|---|
-| **Nichts tun** | Die zwölf Stunden bleiben, ab dem Flash kommt nichts Neues dazu | Die Statistik von 03.–11.08. bleibt unbrauchbar, die Skalierung jeder Statistikkarte auch |
-| **Neun Zeilen nachrechnen** (10.08./11.08.) und per `recorder/import_statistics` überschreiben, dabei zeitgewichtet und nur über die Werte innerhalb 0…150 kg | Die schlimmste Zeile (+70,8 / ±3.750) verschwindet, die Skalierung stimmt wieder | Die drei Zeilen vom 03.08. bleiben (−5,5 kg, unauffällig). 5-Minuten-Statistik bleibt ~10 Tage schmutzig, räumt sich dann selbst auf |
-| **Die ganze Reihe löschen** (`recorder/clear_statistics`) und aus dem Zustandsverlauf neu aufbauen | Alles sauber | Nur die letzten ~10 Tage lassen sich rekonstruieren, alles davor ist endgültig weg |
+| 2026-08-03 10:00 | −3,10 [−5,50 … 2,20] | *gestrichen* |
+| 2026-08-03 11:00 | 0,51 [−5,50 … 2,20] | *gestrichen* |
+| 2026-08-03 14:00 | 2,05 [−3,00 … 2,30] | *gestrichen* |
+| 2026-08-10 12:00 | 1,99 [−5,50 … 2,20] | 2,10 [0,00 … 2,20] |
+| 2026-08-10 13:00 | 1,10 [−1,60 … 2,20] | 1,12 [0,00 … 2,20] |
+| 2026-08-10 19:00 | −0,58 [−5,70 … 1,80] | 0,77 [0,00 … 1,80] |
+| 2026-08-10 20:00 | 2,89 [−5,70 … 10,60] | 3,37 [0,00 … 10,60] |
+| 2026-08-11 10:00 | 24,64 [−0,90 … 27,60] | 25,18 [0,00 … 27,60] |
+| 2026-08-11 11:00 | 13,87 [−3,00 … 26,20] | 22,71 [0,00 … 26,20] |
+| 2026-08-11 12:00 | 21,28 [−9,40 … 40,10] | 23,05 [0,00 … 40,10] |
+| 2026-08-11 16:00 | 21,48 [−4,00 … 39,10] | 24,14 [0,00 … 39,10] |
+| **2026-08-11 18:00** | **70,77 [−3.749,70 … 2.299,40]** | **29,41 [0,00 … 33,50]** |
 
-**Empfehlung: Weg 2.** Er beseitigt den einzigen Ausreißer, der die Auswertung
-wirklich unbrauchbar macht, und stützt sich dabei ausschließlich auf noch
-vorhandene Rohdaten. Die verbleibenden −5,5 kg vom 03.08. verzerren ein
-Stundenmittel um wenige Gramm und sind in keiner Grafik zu sehen.
+### Die Probe
+
+Vor dem Löschen wurde die Abschrift der 251 Stundenzeilen **unabhängig**
+geprüft: aus ihnen lassen sich die zwölf Tageszeilen nachrechnen, die HA
+separat geliefert hatte. Alle zwölf stimmten auf sechs Nachkommastellen. Damit
+war ausgeschlossen, dass ein Abschreibfehler beim Zurückschreiben unbemerkt in
+die Datenbank wandert.
+
+Danach, aus der Datenbank zurückgelesen:
+
+| Tag | Mittel vorher | Mittel nachher | Min vorher | Min nachher |
+|---|---|---|---|---|
+| 30.07.–31.07. | 2,260959 / 2,155060 | **unverändert** | 2,20 | 2,20 |
+| 01.08. | 1,891890 | 2,187759 | −5,50 | 2,10 |
+| 02.08.–07.08. | 2,235820 … 2,100064 | **unverändert** | 2,00–2,20 | 2,00–2,20 |
+| 09.08. | 2,302254 | 2,394948 | −5,70 | 0,00 |
+| 10.08. | 20,185953 | 19,038276 | −3.749,70 | 0,00 |
+
+Die acht unbelasteten Tage kommen **bitgleich** wieder heraus — die
+Wiederherstellung hat nichts angefasst, was sauber war. Kein Wert der Reihe
+liegt mehr außerhalb von 0…150 kg.
+
+### Was dabei doch verloren ging
+
+- **Die drei Stundenzeilen vom 03.08.** (12:00, 13:00 und 16:00 Ortszeit).
+  Dort ist jetzt eine Lücke. Das ist die ehrliche Darstellung: in diesen
+  Stunden wurde kalibriert, ein Stockgewicht gibt es für sie nicht.
+- **Die 5-Minuten-Statistik** (`statistics_short_term`) der ganzen Reihe.
+  `clear_statistics` löscht sie mit, und `import_statistics` schreibt nur
+  Stundenzeilen. Sie hätte sich ohnehin nach ~10 Tagen selbst aufgeräumt; sie
+  betrifft nur die feine Auflösung in Diagrammen der letzten Tage.
+- **Der Zustandsverlauf ist unangetastet.** Dort stehen die −3.749,7 kg noch
+  bis zur nächsten Recorder-Aufräumung (~10 Tage). Das ist Absicht: er ist die
+  Rohdatenquelle, aus der eben gerechnet wurde, und er verschwindet von selbst.
+
+Die alten Werte aller 251 Zeilen liegen als Abschrift vor (Abschnitt oben plus
+die Tabelle der belasteten Zeilen); ein Zurückrollen wäre also möglich, wenn
+sich doch noch etwas als falsch herausstellt.
 
 ---
 
@@ -256,8 +312,11 @@ Stundenmittel um wenige Gramm und sind in keiner Grafik zu sehen.
   −20.755,9) und **„Kalibriert bei"** (aktuell 22,2 °C) auf „nicht leer".
   Beide neuen Globals sind `restore_value: no`, es sollte also nichts
   passieren — geprüft ist das erst am Gerät.
-- **Entscheidung zur Altlast** (Abschnitt 5). Ohne sie bleibt der Auftrag zur
-  Hälfte offen.
+- **Die Statistikkarten im Dashboard einmal ansehen.** Sie skalierten bisher
+  auf ±3.750 kg; das sollte jetzt weg sein. Der Helfer „Waage Tagesbilanz"
+  (`statistics`/`change`/24 h) rechnet dagegen gegen den *Zustandsverlauf*,
+  nicht gegen die Langzeitstatistik — dort stecken die Ausreißer noch bis zur
+  nächsten Recorder-Aufräumung.
 - **Nach dem Flash einmal „Gewicht verworfen" ansehen.** Steht dort nach ein
   paar Intervallen etwas anderes als 0, obwohl nicht kalibriert wurde, stimmt
   etwas an der Kalibrierung nicht.

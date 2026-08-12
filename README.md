@@ -545,9 +545,10 @@ Warum ein Wert verworfen wurde, steht mit Rohwert im Log:
             (Kalibrierung pruefen! roh -599434.0, 1. Mal seit dem Neustart)
 ```
 
-> **Die Statistik von vor dem Umbau bereinigt das nicht.** Das Fenster wirkt ab
-> dem Flash; die Ausreißer, die schon in der Langzeitstatistik stehen, bleiben
-> dort stehen. Siehe
+> **Das Fenster wirkt erst ab dem Flash.** Die Ausreißer, die am 12.08.2026
+> schon in der Langzeitstatistik standen, wurden separat entfernt — zwölf
+> Stundenzeilen, neun davon aus den Rohdaten neu gerechnet, drei ersatzlos
+> gestrichen. Ablauf, Sicherung der alten Werte und die Prüfung stehen in
 > [`docs/sessionbericht-2026-08-12.md`](docs/sessionbericht-2026-08-12.md),
 > Abschnitt „Die Altlast in der Statistik".
 
