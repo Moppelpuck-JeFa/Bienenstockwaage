@@ -315,7 +315,75 @@ sich doch noch etwas als falsch herausstellt.
 
 ---
 
-## 6. Offene Punkte
+## 6. Das Dashboard zeigte die Ausreißer weiter — warum
+
+Nach der Bereinigung standen sie in fünf von sechs Diagrammen immer noch drin.
+Der Grund ist eine Unterscheidung, die man am Kartentyp ablesen kann:
+
+| Kartentyp | liest | war betroffen |
+|---|---|---|
+| `statistics-graph` | Langzeitstatistik (permanent) | nein, war ja bereinigt |
+| `history-graph` | Zustandsverlauf (~10 Tage) | **ja** |
+| Kachel-Feature `trend-graph` | Zustandsverlauf | **ja** |
+
+Bereinigt worden war nur die Langzeitstatistik — und genau eine Karte las
+daraus. **Merksatz: Was in einer `history-graph`-Karte steht, hat mit der
+Langzeitstatistik nichts zu tun.**
+
+### Dabei aufgefallen: die abgeleiteten Helfer
+
+Vier Helfer haben eigene, ebenfalls dauerhafte Langzeitstatistiken, und die
+waren noch dreckig — deutlich schlimmer als das Gewicht, weil eine Ableitung
+den Sprung mit ihrem Zeitfenster multipliziert:
+
+| Helfer | Tag 10.08. vor der Bereinigung |
+|---|---|
+| Waage Änderung (6 h → kg/d) | Min **−15.110 kg/d**, Max **+9.085 kg/d** |
+| Schwarm-Signal (20 min → kg/h) | Min **−11.343 kg/h**, Max **+6.804 kg/h** |
+| Waage Tagesbilanz | Min −3.751 kg, Max +2.298 kg |
+| Futtervorrat | Min −3.768 kg, Max +2.281 kg |
+
+Diese vier wurden per `recorder/clear_statistics` **vollständig gelöscht**,
+nicht Zeile für Zeile repariert. Begründung: Sie tragen keine eigene
+Information — sie sind Ableitungen des Gewichts, und das liegt als saubere
+Reihe vor. Der Aufwand einer zeilenweisen Rekonstruktion (viermal das
+Verfahren aus Abschnitt 5) stünde in keinem Verhältnis, und bei Ableitungen
+schmiert die Störung ohnehin über das jeweilige Fenster aus, die Abgrenzung
+wäre also unschärfer als beim Gewicht.
+
+### Was am Dashboard geändert wurde
+
+Drei `history-graph`-Karten wurden auf `statistics-graph` mit `period: hour`
+umgestellt — Gewicht 48 h (Übersicht), Tagesbilanz 14 Tage und
+Änderung + Schwarm-Signal 7 Tage (Auswertung). Bei 60 min Messintervall
+kostet das nichts: pro Stunde gibt es ohnehin nur einen Messwert, und
+`stat_types: [mean, min, max]` hält auch die Ausschläge fest, wenn die
+Saison-Automation das Intervall auf 15 min stellt.
+
+Die Karte „Rohwert + Temperatur 72 h" bleibt bewusst ein `history-graph`:
+sie war nie betroffen, und für die Fehlersuche ist die volle Auflösung der
+Punkt.
+
+### Zwei Reste, die von selbst verschwinden
+
+- **Die Trend-Kachel „Gewicht" auf der Übersicht** zeigt den Ausschlag noch.
+  Das Kachel-Feature `trend-graph` kann nur den Zustandsverlauf lesen, es
+  gibt keine Statistik-Variante davon. Bei `hours_to_show: 48` ist die
+  Kachel am **13.08. abends** von selbst sauber. Das Feature dafür dauerhaft
+  zu entfernen wäre der schlechtere Tausch.
+- **Die Kachelwerte „Bilanz 24 h" und „Änderung"** stehen noch auf 25,9 kg
+  und 44,47 kg/d. Das sind keine Diagramme, sondern die aktuellen Zustände
+  der Helfer, die ihr eigenes Fenster (24 h bzw. 6 h) noch über den
+  Kalibriersprung hinweg rechnen. Sie normalisieren sich innerhalb dieses
+  Fensters.
+
+Der Zustandsverlauf selbst bleibt unangetastet und wird vom Recorder nach
+10 Tagen aufgeräumt — die letzten Ausreißer fallen damit um den **21.08.**
+heraus.
+
+---
+
+## 7. Offene Punkte
 
 - **Flashen.** Die Änderung wirkt erst danach. Anschließend, wie nach jedem
   Flash: **Kalibrierfaktor prüfen** (Erwartung −18.000 bis −21.000; aktuell

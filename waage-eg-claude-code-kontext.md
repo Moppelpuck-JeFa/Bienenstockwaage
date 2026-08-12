@@ -147,6 +147,18 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   und nimmt das arithmetische Mittel der Töpfe** — wer Statistikzeilen
   nachrechnet, muss das treffen, sonst schreibt er still falsche Geschichte.
   Einzelne Statistikzeilen löschen kann HA nicht.
+- **`history-graph` und das Kachel-Feature `trend-graph` lesen den
+  Zustandsverlauf, nicht die Langzeitstatistik.** Deshalb zeigten sie die
+  Ausreißer nach der Bereinigung weiter. Drei Karten des Dashboards sind
+  jetzt `statistics-graph` mit `period: hour` (Gewicht 48 h, Tagesbilanz
+  14 d, Änderung + Schwarm 7 d); „Rohwert + Temperatur 72 h" bleibt bewusst
+  ein `history-graph`.
+- **Die vier abgeleiteten Helfer** (Tagesbilanz, Änderung, Schwarm-Signal,
+  Futtervorrat) hatten dieselben Ausreißer in ihrer eigenen Langzeitstatistik,
+  durch die Ableitung verstärkt auf bis zu ±15.000 kg/d. Sie wurden am
+  12.08.2026 komplett gelöscht statt repariert — sie sind Ableitungen des
+  Gewichts und tragen keine eigene Information. Ihre Kurven beginnen deshalb
+  am 12.08.2026.
 - **Die Untergrenze liegt bewusst bei −1 kg, nicht bei 0.** Zuerst war 0
   gesetzt; das schnitt aber das Rauschen einer frisch tarierten Waage auf
   halber Höhe ab (−0,1 kg ist dort ein echter Messwert) und hätte den
