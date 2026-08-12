@@ -640,6 +640,146 @@ int main() {
     }
   }
 
+  std::printf("\n== 12. Kalibrier-Sperre im Taktgeber ==\n");
+  {
+    // Nachbau des interval:-Blocks aus waage-basis.yaml, minutenweise.
+    // Enthaelt die drei Sperren in genau der Reihenfolge, in der sie dort
+    // stehen: Durchsicht -> Nachlauf -> Kalibrier-Sperre -> Messintervall.
+    struct Taktgeber {
+      int durchsicht = 0;
+      int nachlauf = 0;
+      int kalibrier = 0;
+      uint32_t minuten_seit_messung = 0;
+      uint32_t soll = 60;
+      int gesammelt = 0;      // Rohwerte, die ins Messfenster gelaufen sind
+
+      // Eine Minute. Liefert true, wenn veroeffentlicht wurde.
+      bool minute() {
+        // Das on_value des HX711 laeuft unabhaengig vom Taktgeber - hier
+        // stellvertretend einmal pro Minute geprueft.
+        if (durchsicht == 0 && nachlauf == 0 && kalibrier == 0) gesammelt++;
+
+        if (durchsicht > 0) {
+          durchsicht--;
+          if (durchsicht == 0) nachlauf = 2;   // script durchsicht_beenden
+          return false;
+        }
+        if (nachlauf > 0) {
+          nachlauf--;
+          if (nachlauf > 0) return false;
+          if (kalibrier > 0) return false;     // Sperre hat Vorrang
+          minuten_seit_messung = 0;
+          return true;
+        }
+        if (kalibrier > 0) {
+          kalibrier--;
+          if (kalibrier > 0) return false;
+          minuten_seit_messung = 0;
+          return true;
+        }
+        minuten_seit_messung++;
+        if (minuten_seit_messung >= soll) {
+          minuten_seit_messung = 0;
+          return true;
+        }
+        return false;
+      }
+      // Der Button-Pfad: script kalibrier_sperre_starten
+      void taste(int dauer) { if (dauer > 0) kalibrier = dauer; }
+      // Der Button "Jetzt messen"
+      bool jetzt_messen() { kalibrier = 0; minuten_seit_messung = 0; return true; }
+    };
+
+    const int SPERRE = 10;   // substitution kalibrier_sperre
+
+    // --- Ohne Sperre laeuft der Takt wie bisher ---
+    {
+      Taktgeber t;
+      int erste = 0;
+      for (int m = 1; m <= 120 && erste == 0; m++) if (t.minute()) erste = m;
+      pruefe("ohne Sperre: planmaessige Messung in Minute 60", erste, 60, 0);
+    }
+
+    // --- Ein Tara sperrt genau die eingestellte Zeit ---
+    {
+      Taktgeber t;
+      t.taste(SPERRE);
+      int werte = 0, erster = 0;
+      for (int m = 1; m <= SPERRE; m++) {
+        if (t.minute()) { werte++; if (!erster) erster = m; }
+      }
+      pruefe("Tara: genau ein Wert innerhalb der Sperre", werte, 1, 0);
+      pruefe("... und zwar erst in der letzten Minute", erster, SPERRE, 0);
+      // Auch in der letzten Minute ist die Sperre beim Sammeln noch aktiv -
+      // heruntergezaehlt wird erst danach. Der Wert, der dann rausgeht, ist
+      // deshalb der Momentanwert der Filterkette und kein Fenstermittel.
+      pruefe("waehrend der Sperre wird gar nichts gesammelt", t.gesammelt, 0, 0);
+    }
+
+    // --- Jeder weitere Druck startet die Zeit neu ---
+    {
+      Taktgeber t;
+      t.taste(SPERRE);
+      int erster = 0;
+      for (int m = 1; m <= 30 && erster == 0; m++) {
+        if (t.minute()) erster = m;
+        // Der zweite Kalibrierschritt, gedrueckt zwischen zwei Takten
+        if (m == 5) t.taste(SPERRE);
+      }
+      pruefe("zweiter Druck nach Minute 5 -> Wert erst in Minute 15", erster,
+             15, 0);
+    }
+
+    // --- "Jetzt messen" ist der ausdrueckliche Ausweg ---
+    {
+      Taktgeber t;
+      t.taste(SPERRE);
+      t.minute();
+      t.minute();
+      pruefe("\"Jetzt messen\" veroeffentlicht sofort", t.jetzt_messen(), 1.0,
+             0.5);
+      pruefe("... und hebt die Sperre auf", t.kalibrier, 0, 0);
+      int naechster = 0;
+      for (int m = 1; m <= 120 && naechster == 0; m++) if (t.minute()) naechster = m;
+      pruefe("danach laeuft wieder ein volles Intervall", naechster, 60, 0);
+    }
+
+    // --- Der Intervall-Zaehler ruht waehrend der Sperre ---
+    {
+      Taktgeber t;
+      for (int m = 1; m <= 30; m++) t.minute();   // 30 min vorgelaufen
+      t.taste(SPERRE);
+      int erster = 0, zweiter = 0;
+      for (int m = 1; m <= 200; m++) {
+        if (t.minute()) { if (!erster) erster = m; else if (!zweiter) zweiter = m; }
+      }
+      pruefe("Sperre laeuft ab -> Wert in Minute 10", erster, SPERRE, 0);
+      pruefe("danach volles Intervall, nicht die Restzeit", zweiter - erster,
+             60, 0);
+    }
+
+    // --- Durchsicht und Kalibrieren gleichzeitig ---
+    // Wer waehrend einer Durchsicht tariert, soll danach EINEN Wert bekommen,
+    // nicht zwei: der Nachlauf tritt zurueck, die Sperre veroeffentlicht.
+    {
+      Taktgeber t;
+      t.durchsicht = 5;
+      t.taste(SPERRE);
+      int werte = 0;
+      for (int m = 1; m <= 20; m++) if (t.minute()) werte++;
+      pruefe("Durchsicht + Tara: genau ein Wert", werte, 1, 0);
+      pruefe("... und keine Sammlung dazwischen", t.gesammelt, 3, 0);
+    }
+
+    // --- Abgeschaltete Sperre ---
+    {
+      Taktgeber t;
+      t.taste(0);          // substitution kalibrier_sperre: "0"
+      pruefe("Sperre 0 sperrt nicht", t.kalibrier, 0, 0);
+    }
+    std::printf("   Sperre %d min, Messintervall 60 min\n", SPERRE);
+  }
+
   std::printf("\n%d Pruefungen, %d Fehler\n", geprueft, fehler);
   return fehler == 0 ? 0 : 1;
 }

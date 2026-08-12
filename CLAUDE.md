@@ -129,6 +129,25 @@ auf +70,8 kg. Daraus folgt:
   Belegt in `tests/`, Punkt 11: bis zu einem Stock bei −0,9 kg wird nichts
   verworfen.
 
+**Tara und Kalibrieren sperren die Übertragung für `kalibrier_sperre` Minuten**
+(Vorgabe 10, `"0"` schaltet ab). Das ist kein Duplikat des
+Plausibilitätsfensters, sondern dessen Ergänzung: **ein aufgelegtes
+Referenzgewicht von 26 kg ist von einem echten Stockgewicht nicht zu
+unterscheiden.** Das Fenster fängt den kaputten Rechenweg, die Sperre den
+falschen Messgegenstand. Daraus folgt:
+
+- **Wer eine Regel gegen falsche Messwerte baut, muss zuerst fragen: „ist
+  dieser Zeitraum überhaupt eine Messung?" — erst dann: „ist dieser Wert
+  plausibel?"** Am 12.08.2026 andersherum gemacht und dafür die halbe
+  Messreihe verloren.
+- Während der Sperre gehen die Entities **mit** `state_class` nicht raus, die
+  Diagnose **ohne** `state_class` schon — sonst fehlte beim Kalibrieren die
+  Rückmeldung.
+- **„Jetzt messen" beendet die Sperre.** Sie schützt gegen Vergessen, nicht
+  gegen Absicht.
+- Das Messfenster sammelt nicht, der Intervallzähler ruht. Beim Ablauf wird
+  sofort veröffentlicht — wie beim Durchsicht-Nachlauf.
+
 **Die Temperaturkompensation steht in `packages/waage-temperatur.h`** — genau
 einmal, weil sie an drei Stellen gebraucht wird (Gewicht, Tara,
 Diagnose-Entity). Die Funktion nimmt reine Zahlen und kennt keine `id()`; nur

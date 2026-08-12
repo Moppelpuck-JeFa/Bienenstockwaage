@@ -109,6 +109,31 @@ substitutions:
   plausibel_kg_min: "-1"
   plausibel_kg_max: "150"
 
+  # --- Kalibrier-Sperre ---
+  # Wie viele Minuten nach einem Druck auf Tara oder einen der beiden
+  # Kalibrier-Buttons NICHTS an Home Assistant geht.
+  #
+  # WOZU, und warum das Plausibilitaetsfenster oben dafuer nicht reicht:
+  # Waehrend einer Kalibrierung liefert die Waage voellig PLAUSIBLE, aber
+  # ungueltige Werte. Ein aufgelegtes Referenzgewicht von 26 kg ist von einem
+  # echten Stockgewicht nicht zu unterscheiden - keine wertbasierte Regel
+  # trennt das. Das Fenster faengt den kaputten Rechenweg, diese Sperre den
+  # falschen Messgegenstand.
+  #
+  # Real nachgewiesen am 10./11.08.2026: Nach der wertbasierten Bereinigung
+  # standen immer noch Einbrueche auf 0,0 kg und Spitzen auf 40,1 und 57,1 kg
+  # in der Langzeitstatistik - alles aus Tara- und Kalibriervorgaengen, alles
+  # innerhalb von -1..150 kg. Am Ende musste die halbe Messreihe zeitbasiert
+  # weggeworfen werden. Details: docs/sessionbericht-2026-08-12.md
+  #
+  # 10 min sind reichlich bemessen: jeder weitere Druck startet die Zeit neu,
+  # es geht also um die Zeit NACH dem letzten Handgriff - Gewicht abraeumen,
+  # Deckel zu, Haende weg. Wer frueher einen Wert will, drueckt "Jetzt
+  # messen"; das beendet die Sperre ausdruecklich.
+  #
+  # "0" schaltet die Sperre ab.
+  kalibrier_sperre: "10"            # min
+
 esphome:
   name: ${geraete_name}
   friendly_name: "${anzeige_name}"
@@ -345,6 +370,17 @@ globals:
     restore_value: no
     initial_value: 'false'
 
+  # Restlaufzeit der Kalibrier-Sperre in Minuten (0 = aus).
+  #
+  # Bewusst NICHT restore_value, aus demselben Grund wie bei
+  # durchsicht_restminuten: eine haengende Sperre, die einen Neustart
+  # ueberlebt und die niemand bemerkt, waere schlimmer als eine verlorene.
+  # Nach einem Neustart misst die Waage wieder normal.
+  - id: kalibrier_restminuten
+    type: int
+    restore_value: no
+    initial_value: '0'
+
 # --- 1-Wire-Bus für den Temperatursensor ---
 # DS18B20 an D5 (GPIO14). D1/D2 sind vom HX711 belegt, D4 wäre GPIO2 und
 # damit ein Boot-Strapping-Pin - deshalb D5.
@@ -407,7 +443,12 @@ sensor:
           // keine Messung des Stocks (Zarge abgestellt, Hand am Rahmen), und
           // im Mittelwert waeren sie hinterher nicht mehr herauszurechnen -
           // anders als bisher, wo sie schlicht nicht veroeffentlicht wurden.
-          if (id(durchsicht_restminuten) > 0 || id(nachlauf_minuten) > 0) {
+          // Dieselbe Sperre gilt waehrend einer Kalibrierung: dann liegen
+          // Pruefgewichte auf, die Waage wird tariert und der Umrechnungsweg
+          // aendert sich mittendrin. Solche Rohwerte in den Mittelwert zu
+          // legen hiesse, sie hinterher nicht mehr herausrechnen zu koennen.
+          if (id(durchsicht_restminuten) > 0 || id(nachlauf_minuten) > 0 ||
+              id(kalibrier_restminuten) > 0) {
             return;
           }
           if (std::isnan(x)) {
@@ -537,7 +578,8 @@ sensor:
             // sonst passten Rohwert- und Temperaturfenster nicht mehr
             // zueinander und die Kompensation rechnete gegen den falschen
             // Zeitraum.
-            if (id(durchsicht_restminuten) == 0 && id(nachlauf_minuten) == 0) {
+            if (id(durchsicht_restminuten) == 0 && id(nachlauf_minuten) == 0 &&
+                id(kalibrier_restminuten) == 0) {
               id(temp_fenster_summe) += x;
               id(temp_fenster_anzahl)++;
             }
@@ -725,6 +767,25 @@ sensor:
   # Bewusst OHNE state_class: das ist kein Messwert, sondern ein Zaehler, der
   # bei jedem Neustart bei 0 anfaengt. In der Langzeitstatistik haette er
   # nichts zu suchen.
+  # Restlaufzeit der Kalibrier-Sperre. Steht hier etwas anderes als 0, kommt
+  # gerade absichtlich kein Messwert - die Waage wurde eben tariert oder
+  # kalibriert.
+  #
+  # WOZU: Ohne diese Entity sieht eine gesperrte Waage in HA genauso aus wie
+  # eine abgestuerzte - die Werte bleiben einfach stehen. Beim Durchsichtmodus
+  # uebernimmt der Schalter diese Rolle, hier gab es nichts Vergleichbares.
+  #
+  # Bewusst OHNE state_class: eine Restlaufzeit ist kein Messwert.
+  - platform: template
+    id: kalibrier_sperre_rest
+    name: "Kalibrier-Sperre"
+    icon: "mdi:timer-lock-outline"
+    unit_of_measurement: "min"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: never
+    lambda: 'return id(kalibrier_restminuten);'
+
   - platform: template
     id: gewicht_verworfen
     name: "Gewicht verworfen"
@@ -815,6 +876,19 @@ button:
       # letzten Stunden waere dafuer die falsche Antwort und saehe zudem aus
       # wie ein Fehler ("ich habe doch gerade 5 kg draufgestellt").
       # Entsprechend zeigt "Rohwert Streuung" danach keinen neuen Wert an.
+      #
+      # Dieser Button ist zugleich der ausdrueckliche Ausweg aus der
+      # Kalibrier-Sperre: Wer ihn drueckt, WILL jetzt einen Wert in HA. Eine
+      # Sperre, die sich ueber eine so eindeutige Handlung hinwegsetzt, waere
+      # bevormundend - und sie saehe aus wie ein Defekt ("der Knopf tut
+      # nichts"). Die Sperre schuetzt gegen Vergessen, nicht gegen Absicht.
+      - lambda: |-
+          if (id(kalibrier_restminuten) > 0) {
+            ESP_LOGI("waage", "Kalibrier-Sperre durch \"Jetzt messen\" "
+                              "beendet (%d min waeren noch offen gewesen)",
+                     id(kalibrier_restminuten));
+            id(kalibrier_restminuten) = 0;
+          }
       - script.execute: messfenster_frisch
       - script.execute: messwerte_veroeffentlichen
       - lambda: |-
@@ -830,11 +904,12 @@ button:
     name: "Tara"
     icon: "mdi:scale-balance"
     on_press:
+      # Ein Tara verschiebt den Nullpunkt der Anzeige - danach ist erstmal
+      # nichts mehr eine Messung des Stocks, bis die Haende weg sind.
+      - script.execute: kalibrier_sperre_starten
       # Tara gilt ab JETZT. Das laufende Fenster stammt aus der Zeit davor und
       # wuerde den naechsten Mittelwert um den halben Tara-Betrag verfaelschen -
-      # also verwerfen und mit dem Momentanwert weiterrechnen. Nebeneffekt und
-      # Absicht zugleich: die Anzeige steht danach sofort sauber auf 0,0 kg,
-      # weil Tara und Anzeige denselben Rohwert benutzen.
+      # also verwerfen und mit dem Momentanwert weiterrechnen.
       - script.execute: messfenster_frisch
       - lambda: |-
           float raw = id(mittel_rohwert);
@@ -860,15 +935,24 @@ button:
           } else {
             ESP_LOGW("waage", "Tara ignoriert: Waage noch nicht kalibriert");
           }
-      - component.update: waage_gewicht
-      - component.update: rohwert
+      # Bewusst NUR die Rechenanteile ohne state_class. "Gewicht" und
+      # "Rohwert" bleiben stehen, bis die Sperre ablaeuft - sonst stuende
+      # genau der Wert dauerhaft in der Langzeitstatistik, den das Tara gerade
+      # kuenstlich auf null gesetzt hat. Wer die 0,0 kg sofort sehen will,
+      # drueckt danach "Jetzt messen".
       - component.update: temperaturkorrektur
+      - component.update: kalibrier_sperre_rest
 
   # Kalibrierung Schritt 1: Waage LEER lassen, ~1min warten, dann drücken
   - platform: template
     name: "Kalibrieren 0kg"
     icon: "mdi:target"
     on_press:
+      # Ab hier ist die Waage eine Baustelle: Nullpunkt gesetzt, aber der
+      # Referenzpunkt stammt noch aus der alten Kalibrierung. Der
+      # Umrechnungsfaktor ist in diesem Zustand rechnerisch halb richtig, die
+      # Anzeige sieht aber weiter plausibel aus - genau das darf nicht nach HA.
+      - script.execute: kalibrier_sperre_starten
       # Wie beim Tara: die im laufenden Fenster gesammelten Rohwerte sind gegen
       # die ALTE Kalibrierung entstanden und haben im naechsten Mittelwert
       # nichts zu suchen.
@@ -898,12 +982,15 @@ button:
           }
           ESP_LOGI("waage", "Nullpunkt gesetzt: roh %.1f (Tara zurueckgesetzt)",
                    raw);
-      - component.update: waage_gewicht
-      - component.update: rohwert
+      # Wieder nur die Diagnose ohne state_class - sie ist die Rueckmeldung,
+      # auf die es beim Kalibrieren ankommt. "Gewicht" und "Rohwert" kommen
+      # erst wieder, wenn die Sperre ablaeuft.
+      #
       # Der Nullpunkt geht in den Span ein - der Kalibrierfaktor aendert sich
       # dadurch ebenfalls und muss neu veroeffentlicht werden
       - component.update: kalibrierfaktor
       - component.update: kalibriert_bei
+      - component.update: kalibrier_sperre_rest
       # Der Bezugspunkt hat sich geaendert, damit auch die Korrektur
       # (unmittelbar nach dem Kalibrieren ist sie 0)
       - component.update: temperaturkorrektur
@@ -914,6 +1001,11 @@ button:
     name: "Kalibrieren Referenzgewicht"
     icon: "mdi:target"
     on_press:
+      # Jetzt liegt ein Pruefgewicht auf. Genau das ist der Fall, den keine
+      # wertbasierte Regel erkennen kann: 26 kg Referenzgewicht sehen aus wie
+      # 26 kg Stock. Die Sperre laeuft ab hier neu an, deckt also das
+      # Abraeumen danach mit ab.
+      - script.execute: kalibrier_sperre_starten
       # Siehe "Kalibrieren 0kg": laufendes Fenster verwerfen, Momentanwert
       # nehmen. Hier zusaetzlich wichtig, weil im Fenster die Zeit VOR dem
       # Auflegen des Referenzgewichts steckt - der Span kaeme sonst zu klein
@@ -952,10 +1044,11 @@ button:
           ESP_LOGI("waage", "Referenzpunkt gesetzt: %.3f kg = roh %.1f "
                             "(Span %.1f counts, %.1f counts/kg)",
                    ref, raw, span, span / ref);
-      - component.update: waage_gewicht
-      - component.update: rohwert
+      # Nur die Diagnose - "Gewicht" und "Rohwert" waeren hier das
+      # aufliegende Pruefgewicht, nicht der Stock.
       - component.update: kalibriert_mit
       - component.update: kalibrierfaktor
+      - component.update: kalibrier_sperre_rest
 
 # --- Einstellbares Referenzgewicht + Messintervall ---
 # Beide erscheinen in HA als Eingabefeld (mode: box, also Zahl eintippen statt
@@ -1214,6 +1307,28 @@ script:
           id(kalibriert_bei).update();
           id(temperaturkorrektur).update();
           id(gewicht_verworfen).update();
+          id(kalibrier_sperre_rest).update();
+
+  # --- Kalibrier-Sperre starten ---
+  # Wird von allen drei Buttons aufgerufen, die die Grundlage der Messung
+  # anfassen: Tara, "Kalibrieren 0kg", "Kalibrieren Referenzgewicht".
+  #
+  # Jeder Druck startet die Zeit NEU (wie beim Durchsicht-Taster). Bei einer
+  # Zwei-Punkt-Kalibrierung liegen zwischen den beiden Druecken ein paar
+  # Minuten - gezaehlt wird deshalb ab dem letzten Handgriff, nicht ab dem
+  # ersten.
+  - id: kalibrier_sperre_starten
+    mode: single
+    then:
+      - lambda: |-
+          int dauer = ${kalibrier_sperre};
+          if (dauer <= 0) {
+            return;   // Sperre per substitution abgeschaltet
+          }
+          id(kalibrier_restminuten) = dauer;
+          id(kalibrier_sperre_rest).update();
+          ESP_LOGI("waage", "Kalibrier-Sperre: %d min keine Uebertragung "
+                            "(\"Jetzt messen\" beendet sie vorzeitig)", dauer);
 
   - id: durchsicht_starten
     mode: restart
@@ -1282,6 +1397,12 @@ interval:
             if (id(nachlauf_minuten) > 0) {
               return;
             }
+            // Wurde waehrend der Durchsicht auch noch tariert oder
+            // kalibriert, hat die Kalibrier-Sperre Vorrang: sie
+            // veroeffentlicht selbst, wenn sie ablaeuft.
+            if (id(kalibrier_restminuten) > 0) {
+              return;
+            }
             ESP_LOGI("waage", "Nachlauf beendet - erster Wert nach der Durchsicht");
             id(minuten_seit_messung) = 0;
             // Momentanwert statt Fenster: waehrend Durchsicht und Nachlauf
@@ -1289,6 +1410,36 @@ interval:
             // Durchsicht uebrig ist, gehoert zu einem anderen Stockzustand -
             // eine abgenommene Honigzarge steckte sonst zur Haelfte im ersten
             // Wert danach.
+            id(messfenster_frisch).execute();
+            id(messwerte_veroeffentlichen).execute();
+            return;
+          }
+
+          // --- Kalibrier-Sperre ---
+          // Nach Tara oder Kalibrieren gehoert das, was die Waage anzeigt,
+          // nicht dem Stock: da liegt ein Pruefgewicht auf, oder der
+          // Nullpunkt ist gerade verschoben worden. Solche Werte sind
+          // PLAUSIBEL und deshalb hinterher nicht mehr von echten zu
+          // trennen - anders als bei den Ausreissern, die das
+          // Plausibilitaetsfenster faengt.
+          //
+          // Aufgebaut wie der Durchsicht-Nachlauf: herunterzaehlen, und beim
+          // Ablauf sofort einen frischen Wert schicken, damit man in HA
+          // sieht, dass die Waage wieder arbeitet. Der Intervall-Zaehler
+          // ruht solange - die Sperre verschiebt die naechste planmaessige
+          // Messung, sie verschluckt sie nicht.
+          if (id(kalibrier_restminuten) > 0) {
+            id(kalibrier_restminuten)--;
+            id(kalibrier_sperre_rest).update();
+            if (id(kalibrier_restminuten) > 0) {
+              return;
+            }
+            ESP_LOGI("waage", "Kalibrier-Sperre abgelaufen - erster Wert "
+                              "danach");
+            id(minuten_seit_messung) = 0;
+            // Momentanwert statt Fenster: waehrend der Sperre wurde nichts
+            // gesammelt, und was davor uebrig war, gehoert zur alten
+            // Kalibrierung.
             id(messfenster_frisch).execute();
             id(messwerte_veroeffentlichen).execute();
             return;

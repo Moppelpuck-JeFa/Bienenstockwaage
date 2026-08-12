@@ -420,21 +420,93 @@ Lastwechsel von heute früh — das ist ein echtes Ereignis, kein Artefakt.
 
 ---
 
-## 7. Offene Punkte
+## 7. Die Kalibrier-Sperre
+
+Aus der Lehre von Abschnitt 5 gebaut, im selben Zug.
+
+**Die Regel:** Tara, „Kalibrieren 0kg" und „Kalibrieren Referenzgewicht"
+setzen `kalibrier_restminuten` auf `kalibrier_sperre` (substitution, Vorgabe
+10 min). Jeder weitere Druck startet die Zeit neu — gezählt wird ab dem
+letzten Handgriff, nicht ab dem ersten, sonst läge das Abräumen des
+Prüfgewichts außerhalb.
+
+**Was gesperrt wird, und was nicht.** Die Trennlinie ist `state_class`:
+
+| | während der Sperre |
+|---|---|
+| Gewicht, Rohwert, Rohwert Streuung, Temperatur Mittel | nicht veröffentlicht |
+| Kalibrierfaktor, Kalibriert bei/mit, Temperaturkorrektur | sofort aktualisiert |
+| Temperatur (eigener 60-s-Takt) | unverändert |
+| Messfenster | sammelt nicht |
+| Messintervall-Zähler | ruht |
+
+Das ist der Kern des Entwurfs: Genau die Entities, die dauerhaft in der
+Langzeitstatistik landen, schweigen — und genau die, die beim Kalibrieren die
+Rückmeldung geben, sprechen weiter. Ohne diese Trennung wäre die Sperre
+unbenutzbar: man drückt „Kalibrieren Referenzgewicht" und will wissen, ob der
+Faktor jetzt stimmt.
+
+**Der Preis, ehrlich benannt:** Bisher stand die Anzeige nach einem Tara sofort
+auf 0,0 kg — das war ausdrücklich so kommentiert. Das entfällt. Der Weg dahin
+ist jetzt ein zweiter Druck auf „Jetzt messen", und der ist zugleich der
+ausdrückliche Ausweg aus der Sperre. Begründung: Wer den Button drückt, *will*
+einen Wert in HA. Eine Sperre, die sich über eine so eindeutige Handlung
+hinwegsetzt, wäre bevormundend und sähe aus wie ein Defekt („der Knopf tut
+nichts"). **Die Sperre schützt gegen Vergessen, nicht gegen Absicht.**
+
+**Neue Diagnose-Entity „Kalibrier-Sperre"** (Restminuten, ohne `state_class`).
+Ohne sie sähe eine gesperrte Waage in HA genauso aus wie eine abgestürzte —
+die Werte bleiben einfach stehen. Beim Durchsichtmodus übernimmt der Schalter
+diese Rolle, hier gab es nichts Vergleichbares.
+
+**Reihenfolge der Sperren** im Taktgeber: Durchsicht → Nachlauf →
+Kalibrier-Sperre → Messintervall. Wer während einer Durchsicht tariert, bekommt
+danach genau *einen* Wert: der Durchsicht-Nachlauf tritt zurück, die
+Kalibrier-Sperre veröffentlicht. Ohne diese Rangfolge kämen zwei.
+
+### Geprüft
+
+- `esphome config` vorher/nachher, alle drei Stöcke: **108 geänderte Zeilen,
+  für alle drei identisch.** Kein bestehender Entity-Name angetastet, das neue
+  Global hat `restore_value: no`.
+- `tests/`, neuer Punkt 12 baut den Taktgeber mit allen drei Sperren nach:
+  **4092 Prüfungen, 0 Fehler.** Darin: genau ein Wert pro Sperre, zweiter
+  Druck startet neu (Wert erst in Minute 15), „Jetzt messen" hebt die Sperre
+  auf und danach läuft wieder ein volles Intervall, Durchsicht + Tara ergibt
+  einen Wert statt zwei, `kalibrier_sperre: "0"` sperrt nicht.
+
+Zwei meiner Erwartungen im Test waren zuerst falsch, und beide Korrekturen
+sind dokumentiert, weil sie Feinheiten zeigen:
+
+1. **Während der Sperre wird gar nichts gesammelt, auch nicht in der letzten
+   Minute** — heruntergezählt wird erst nach der Sammelprüfung. Der Wert, der
+   beim Ablauf rausgeht, ist deshalb immer der Momentanwert der Filterkette
+   und nie ein Fenstermittel.
+2. **Ein Druck „zwischen zwei Takten" verschiebt um volle 10 Minuten**, ein
+   Druck unmittelbar vor einem Takt nur um 9 — die Sperre ist auf
+   Minutenraster gerundet. Für 10 min Sperre irrelevant, beim Nachrechnen aber
+   verwirrend.
+
+---
+
+## 8. Offene Punkte
 
 - **Flashen.** Die Änderung wirkt erst danach. Anschließend, wie nach jedem
   Flash: **Kalibrierfaktor prüfen** (Erwartung −18.000 bis −21.000; aktuell
   −20.755,9) und **„Kalibriert bei"** (aktuell 22,2 °C) auf „nicht leer".
   Beide neuen Globals sind `restore_value: no`, es sollte also nichts
   passieren — geprüft ist das erst am Gerät.
-- **Kalibrieren sollte die Veröffentlichung sperren.** Der Durchsichtmodus
-  löst genau dieses Problem für die Durchsicht — für die Kalibrierung gibt es
-  nichts Vergleichbares, obwohl der Schaden derselbe ist: plausibel
-  aussehende Werte, die keine Messung sind, dauerhaft in der Statistik. Ein
-  Nachlauf analog zum Durchsicht-Nachlauf (die drei Kalibrier-/Tara-Buttons
-  setzen ihn, er sperrt das Veröffentlichen für ein paar Minuten) wäre die
-  naheliegende Lösung. **Nicht umgesetzt** — das ist ein eigener Entwurf,
-  kein Nebenprodukt dieser Session.
+- ~~**Kalibrieren sollte die Veröffentlichung sperren.**~~ **Erledigt**, siehe
+  Abschnitt 7.
+- **Zwei neue Entities aufs Dashboard, aber erst nach dem Flash.**
+  „Gewicht verworfen" und „Kalibrier-Sperre" gibt es auf dem Gerät noch nicht;
+  eine Karte dafür stünde bis dahin auf „Entity nicht gefunden". Beide gehören
+  in die Technik-Ansicht zur übrigen Diagnose, und in die Kalibrier-Karte ein
+  Satz zur Sperre.
+- **Die Sperrdauer nach der ersten echten Kalibrierung prüfen.** 10 min sind
+  geschätzt, nicht gemessen: reichlich für „Gewicht abräumen, Deckel zu", aber
+  ob es am Stock mit Handschuhen reicht, zeigt erst der erste Durchgang im
+  Garten.
 - **Die Reihe ist jetzt kurz.** Sie beginnt am 11.08. um 21:00 Uhr. Wer in
   den nächsten Tagen auf die 30-Tage-Karte sieht, sieht fast nichts — das ist
   richtig so und kein Fehler.

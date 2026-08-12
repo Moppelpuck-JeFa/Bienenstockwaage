@@ -17,16 +17,22 @@ HA-Seite (7 Helfer, 4 Automationen, 3-Ansichten-Dashboard) ist eingerichtet. Es 
 sich jetzt um Feinschliff, offene Messungen und mögliche Erweiterungen — nicht mehr um
 einen Neuaufbau von Null.
 
-**Repo:** `github.com/Moppelpuck-JeFa/Bienenstockwaage` (privat). **Stand: 11.08.2026.**
+**Repo:** `github.com/Moppelpuck-JeFa/Bienenstockwaage` (privat). **Stand: 12.08.2026.**
 Temperaturkompensation (PR #1) und Messfenster-Mittelung sind beide nach `main`
-gemerged; Entwicklungsbranches gibt es aktuell keine.
+gemerged. Offener Branch: `claude/weight-stats-outliers-cleanup-pct5w3`
+(Plausibilitätsfenster, Kalibrier-Sperre, Statistik-Bereinigung).
 
-**Geflasht ist der Stand vom 11.08. 19:21 Uhr.** Der Fix „Beim Booten keine
-Platzhalter-Kalibrierwerte nach HA senden" kam danach und ist **noch nicht auf
-dem Gerät**. Ebenfalls offen: **die Kalibrierung ist kaputt** (Faktor +753,58
-statt −18.000…−21.000, gebrochen am 11.08. um 13:59 und damit vor dem Flash) —
-beide Kalibrierschritte müssen neu gefahren werden. Details im
-[Sessionbericht 11.08., Abschnitt 10](docs/sessionbericht-2026-08-11.md).
+**Geflasht ist weiterhin der Stand vom 11.08. 19:21 Uhr.** Noch nicht auf dem
+Gerät sind: der Fix „Beim Booten keine Platzhalter-Kalibrierwerte nach HA
+senden", das Plausibilitätsfenster, der Zähler „Gewicht verworfen" und die
+Kalibrier-Sperre samt ihrer Entity.
+
+**Die Kalibrierung ist wieder in Ordnung** — am 11.08. um 20:34 Uhr neu
+gefahren, seitdem **−20.755,9 counts/kg**, „Kalibriert bei" 22,2 °C,
+„Kalibriert mit" 26,221 kg. Der Bruch davor (Faktor +753,58) ist Geschichte,
+hat aber die Langzeitstatistik gekostet: sie beginnt jetzt bei dieser
+Kalibrierung. Details im
+[Sessionbericht 12.08.](docs/sessionbericht-2026-08-12.md).
 
 **Chronologie in den Sessionberichten** — bei "warum ist das so?" zuerst dort nachsehen:
 
@@ -36,7 +42,7 @@ beide Kalibrierschritte müssen neu gefahren werden. Details im
 | [04.08.](docs/sessionbericht-2026-08-04.md) | Umstellung auf substitutions/packages, Namensschema |
 | [10.08.](docs/sessionbericht-2026-08-10.md) | Temperaturkompensation eingebaut, Schwarm-Alarm gesperrt |
 | [11.08.](docs/sessionbericht-2026-08-11.md) | Rohwerte über das Messintervall gemittelt, Diagnose "Rohwert Streuung" und "Temperatur Mittel" |
-| [12.08.](docs/sessionbericht-2026-08-12.md) | Plausibilitätsfenster 0–150 kg, Zähler "Gewicht verworfen", Bestandsaufnahme der Ausreißer in der Langzeitstatistik |
+| [12.08.](docs/sessionbericht-2026-08-12.md) | Plausibilitätsfenster −1…150 kg, Zähler "Gewicht verworfen", Langzeitstatistik bereinigt und zeitbasiert geschnitten, Kalibrier-Sperre |
 
 **Wichtig:** Workflow-Sprache ist Deutsch — Code-Kommentare, YAML-Labels, Entity-Namen
 und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
@@ -54,9 +60,9 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
 | Durchsicht-Taster | `D2` (GPIO4) gegen GND, interner Pull-up |
 | Durchsicht-LED | `D7` (GPIO13) gegen GND, 1 kΩ Vorwiderstand |
 
-**Gemessene Istwerte (Stand 10.08.2026, nach der Neukalibrierung um 15:01/15:03):**
-- Kalibrierfaktor: **−20.874 counts/kg** (negativ = invertierte Signalpolarität, funktional unkritisch)
-- Kalibriert mit 2,218 kg Referenzgewicht, "Kalibriert bei" **25,8 °C**
+**Gemessene Istwerte (Stand 12.08.2026, nach der Neukalibrierung am 11.08. um 20:33/20:34):**
+- Kalibrierfaktor: **−20.755,9 counts/kg** (negativ = invertierte Signalpolarität, funktional unkritisch)
+- Kalibriert mit 26,221 kg Referenzgewicht, "Kalibriert bei" **22,2 °C**
 - Temperaturkoeffizient: **+32,5 g/K**
 - Rohwert leer: ~26.700 counts → rund 400 kg rechnerischer ADC-Vorrat (mechanisches Limit von 200 kg greift vorher)
 - WLAN-Signal: −74 bis −76 dBm (Grenzbereich, beobachten)
@@ -173,6 +179,29 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   mit −1 wird bis zu einem Stock bei −0,9 kg nichts verworfen. Für eine
   Driftmessung mit leerer Waage `plausibel_kg_min: "-5"` setzen.
 
+### Kalibrier-Sperre (seit 12.08.2026)
+- Tara und beide Kalibrier-Buttons sperren die Übertragung für
+  `kalibrier_sperre` Minuten (substitution, Vorgabe **10**, `"0"` = aus).
+  Jeder weitere Druck startet die Zeit neu.
+- **Warum zusätzlich zum Plausibilitätsfenster:** Ein aufgelegtes
+  Referenzgewicht von 26 kg ist von einem echten Stockgewicht nicht zu
+  unterscheiden. Das Fenster fängt den kaputten *Rechenweg*, die Sperre den
+  falschen *Messgegenstand*. Real belegt: nach der wertbasierten Bereinigung
+  standen immer noch 0,0 / 40,1 / 57,1 kg aus Kalibriervorgängen in der
+  Statistik.
+- Während der Sperre: Entities **mit** `state_class` gehen nicht raus, die
+  Diagnose **ohne** `state_class` schon (Kalibrierfaktor, Kalibriert bei/mit,
+  Temperaturkorrektur) — sonst fehlte beim Kalibrieren die Rückmeldung.
+  Das Messfenster sammelt nicht, der Intervallzähler ruht.
+- **„Jetzt messen" beendet die Sperre** und veröffentlicht sofort. So holt man
+  sich nach einem Tara die 0,0 kg bewusst in die Statistik.
+- Neue Diagnose-Entity **„Kalibrier-Sperre"** (Restminuten, ohne
+  `state_class`) — ohne sie sähe eine gesperrte Waage aus wie eine
+  abgestürzte.
+- Reihenfolge der Sperren im Taktgeber: Durchsicht → Nachlauf →
+  Kalibrier-Sperre → Messintervall. Wer während einer Durchsicht tariert,
+  bekommt danach genau *einen* Wert.
+
 ### Kritische Plattform-Fallstricke (ESP8266 / ESPHome)
 - **`restore_from_flash: true` ist ZWINGEND.** Ohne diese Zeile landen alle
   `restore_value`-Globals nur im RTC-RAM → gehen bei jedem Stromausfall verloren,
@@ -236,7 +265,7 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
 - Neue Stöcke starten mit `0`. Der Wert von waage-eg gilt nur für dessen Aufbau.
 - Nicht kompensiert: Kriechen (−10,9 g/Tag, abklingend) und Gradienten zwischen den
   vier Zellen (kann ein einzelner Sensor prinzipiell nicht).
-- Prüfprogramm ohne Hardware: `tests/waage-temperatur-test.cpp` (`g++`, 4079 Prüfungen).
+- Prüfprogramm ohne Hardware: `tests/waage-temperatur-test.cpp` (`g++`, 4092 Prüfungen).
   Bindet die echten Header-Dateien ein, prüft also den ausgelieferten Code. Wer die
   Lambdas in `waage-basis.yaml` ändert, muss den Nachbau dort mitziehen — seit dem
   11.08. gilt das auch für die Filterkette und das Messfenster (Punkt 10).

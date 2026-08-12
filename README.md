@@ -85,6 +85,10 @@ Details zur Verdrahtung und zum Rest der Deep-Sleep-Vorbereitung:
   einer halben Kalibrierung, und sie stünden sonst dauerhaft in der
   Langzeitstatistik. Der Zähler „Gewicht verworfen" macht sichtbar, dass es
   passiert ist. Siehe unten
+- **Kalibrier-Sperre** — nach Tara oder Kalibrieren 10 Minuten lang keine
+  Übertragung. Ein aufgelegtes Prüfgewicht ist von einem echten Stockgewicht
+  nicht zu unterscheiden; das Plausibilitätsfenster kann diesen Fall
+  prinzipiell nicht fangen. „Jetzt messen" beendet die Sperre. Siehe unten
 - **Verbindungsstatus und WLAN-Signal** als Diagnose — damit ein Ausfall
   auffällt, statt dass die Sensoren still ihren letzten Wert behalten
 - Fallback-Hotspot, OTA-Updates, Webserver auf Port 80
@@ -173,6 +177,14 @@ drei Buttons gilt: erst auflegen bzw. abräumen, **~1 Minute warten**, dann drü
    **"Waage eG Kalibrieren Referenzgewicht"**
 4. Fertig. Ob es geklappt hat, steht im ESPHome-Log (`Nullpunkt gesetzt: ...`
    bzw. `Referenzpunkt gesetzt: 10.000 kg = roh ... (Span ... counts, ... counts/kg)`).
+5. **Danach kommen 10 Minuten lang keine Gewichtswerte in HA** — siehe
+   „Kalibrier-Sperre" unten. Prüfgewicht abräumen, Deckel zu, Hände weg; die
+   Waage meldet sich von selbst wieder. Wer nicht warten will, drückt
+   **„Jetzt messen"**.
+
+Die Rückmeldung, ob die Kalibrierung gestimmt hat, steht in **„Kalibrierfaktor"**
+und **„Kalibriert bei"** — die werden sofort aktualisiert, auch während der
+Sperre.
    Die Diagnose-Entity **"Waage eG Kalibriert mit"** zeigt danach dauerhaft an,
    mit welchem Gewicht zuletzt tatsächlich kalibriert wurde.
 
@@ -557,6 +569,56 @@ Warum ein Wert verworfen wurde, steht mit Rohwert im Log:
 > Kalibrierung (11.08.2026, 20:34 Uhr). Begründung und Ablauf in
 > [`docs/sessionbericht-2026-08-12.md`](docs/sessionbericht-2026-08-12.md),
 > Abschnitt „Die Altlast in der Statistik".
+
+## Kalibrier-Sperre: was ein Fenster nicht fangen kann
+
+Nach jedem Druck auf **Tara**, **Kalibrieren 0kg** oder **Kalibrieren
+Referenzgewicht** überträgt die Waage **10 Minuten lang kein Gewicht** an Home
+Assistant. Jeder weitere Druck startet die Zeit neu — gezählt wird also ab dem
+letzten Handgriff.
+
+**Warum das Plausibilitätsfenster dafür nicht reicht.** Ein aufgelegtes
+Referenzgewicht von 26 kg ist von einem echten Stockgewicht von 26 kg nicht zu
+unterscheiden. Solche Werte sind *plausibel* und trotzdem keine Messung des
+Volkes — keine wertbasierte Regel der Welt trennt das. Das Fenster fängt den
+kaputten **Rechenweg**, die Sperre den falschen **Messgegenstand**.
+
+Dass das kein theoretisches Problem ist, zeigt der 10./11.08.2026: Nach der
+wertbasierten Bereinigung standen immer noch Einbrüche auf 0,0 kg und Spitzen
+auf 40,1 und 57,1 kg in der Langzeitstatistik — alles aus Tara- und
+Kalibriervorgängen, alles innerhalb der Grenzen. Am Ende musste die halbe
+Messreihe zeitbasiert weggeworfen werden.
+
+**Was während der Sperre passiert:**
+
+| | |
+|---|---|
+| Gewicht, Rohwert, Streuung, Temperatur Mittel | werden **nicht** veröffentlicht |
+| Kalibrierfaktor, Kalibriert bei/mit, Temperaturkorrektur | werden **sofort** aktualisiert — das ist die Rückmeldung beim Kalibrieren |
+| Temperatur (60-s-Takt) | läuft unverändert weiter |
+| Messfenster | sammelt nicht — die Rohwerte gehören zum Prüfgewicht, nicht zum Stock |
+| Messintervall-Zähler | ruht; die Sperre verschiebt die nächste planmäßige Messung, sie verschluckt sie nicht |
+
+Läuft die Sperre ab, kommt **sofort** ein frischer Wert (Momentanwert, kein
+Intervallmittel) — damit man sieht, dass die Waage wieder arbeitet.
+
+**„Jetzt messen" beendet die Sperre.** Wer den Button drückt, will einen Wert
+in HA; eine Sperre, die sich darüber hinwegsetzt, wäre bevormundend und sähe
+aus wie ein Defekt. Sie schützt gegen Vergessen, nicht gegen Absicht. Genau so
+holt man sich nach einem Tara die 0,0 kg sofort in die Statistik.
+
+**Die Diagnose-Entity „Kalibrier-Sperre"** zeigt die Restminuten. Steht dort
+etwas anderes als 0, kommt gerade absichtlich nichts. Ohne sie sähe eine
+gesperrte Waage in HA genauso aus wie eine abgestürzte.
+
+**Dauer ändern:** `kalibrier_sperre` in
+[`packages/waage-basis.yaml`](packages/waage-basis.yaml), pro Stock
+überschreibbar. `"0"` schaltet die Sperre ab.
+
+> Der **Durchsichtmodus** löst dasselbe Problem für die Durchsicht und ist
+> davon unabhängig. Wer während einer Durchsicht tariert, bekommt danach
+> genau *einen* Wert: der Durchsicht-Nachlauf tritt zurück, die Kalibrier-Sperre
+> veröffentlicht.
 
 ## Fehlersuche: die Waage misst Unsinn
 
