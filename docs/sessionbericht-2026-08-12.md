@@ -489,7 +489,45 @@ sind dokumentiert, weil sie Feinheiten zeigen:
 
 ---
 
-## 8. Offene Punkte
+## 8. Der Flash — und was er bewiesen hat
+
+Geflasht am 12.08.2026. Das Prüfprogramm nach jedem Flash:
+
+| Prüfung | Erwartung | Befund |
+|---|---|---|
+| Kalibrierfaktor | −18.000 … −21.000 | **−20.755,91** — unverändert |
+| „Kalibriert bei" | nicht leer | **22,2 °C** |
+| „Kalibriert mit" | 26,221 kg | 26,221 kg |
+| Gewicht kommt an | ja | 35,7 kg |
+| Neue Entities | vorhanden | „Gewicht verworfen" 0, „Kalibrier-Sperre" 0 min |
+
+**Damit ist die Ableitung aus dem Quelltext erstmals am Gerät bestätigt.** Der
+Flash brachte **drei** neue Globals mit (`verworfene_gewichte`,
+`erste_messung_erfolgt`, `kalibrier_restminuten`), alle mit
+`restore_value: no` — und die Kalibrierung stand danach unverändert. Bisher
+hatte jeder Flash mit neuen Globals sie gekostet (03.08. und 10.08.), beide
+Male mit `restore_value: yes`.
+
+Ein Datenpunkt ist kein Beweis, und die Regel „nach jedem Flash prüfen" bleibt
+deshalb bestehen. Aber die Empfehlung, neue Globals nach Möglichkeit
+`restore_value: no` zu geben, hat jetzt mehr als nur eine Quelltextlesung
+hinter sich.
+
+**„Rohwert Streuung" stand direkt nach dem Boot auf `unbekannt`** — das ist
+richtig so und kein Fehler: Der erste Wert nach einem Neustart ist der
+Momentanwert der Filterkette, zu dem es kein Messfenster und damit keine
+Streuung gibt. Steht in der README unter „Rohwert Streuung".
+
+### Auf dem Dashboard
+
+Beide neuen Entities als Kacheln in die Technik-Ansicht zur übrigen Diagnose,
+mit Leseanleitung im Erläuterungstext darunter. Die Kalibrier-Karte erklärt
+jetzt die Sperre und den Ausweg über „Jetzt messen" — dort steht sie genau
+dann vor Augen, wenn sie gebraucht wird.
+
+---
+
+## 9. Offene Punkte
 
 - **Flashen.** Die Änderung wirkt erst danach. Anschließend, wie nach jedem
   Flash: **Kalibrierfaktor prüfen** (Erwartung −18.000 bis −21.000; aktuell
@@ -498,11 +536,10 @@ sind dokumentiert, weil sie Feinheiten zeigen:
   passieren — geprüft ist das erst am Gerät.
 - ~~**Kalibrieren sollte die Veröffentlichung sperren.**~~ **Erledigt**, siehe
   Abschnitt 7.
-- **Zwei neue Entities aufs Dashboard, aber erst nach dem Flash.**
-  „Gewicht verworfen" und „Kalibrier-Sperre" gibt es auf dem Gerät noch nicht;
-  eine Karte dafür stünde bis dahin auf „Entity nicht gefunden". Beide gehören
-  in die Technik-Ansicht zur übrigen Diagnose, und in die Kalibrier-Karte ein
-  Satz zur Sperre.
+- ~~**Flashen.**~~ **Erledigt am 12.08.2026** — siehe Abschnitt 9.
+- ~~**Zwei neue Entities aufs Dashboard.**~~ **Erledigt**, beide Kacheln stehen
+  in der Technik-Ansicht bei der übrigen Diagnose, mit Erläuterung; die
+  Kalibrier-Karte erklärt jetzt die Sperre.
 - **Die Sperrdauer nach der ersten echten Kalibrierung prüfen.** 10 min sind
   geschätzt, nicht gemessen: reichlich für „Gewicht abräumen, Deckel zu", aber
   ob es am Stock mit Handschuhen reicht, zeigt erst der erste Durchgang im
@@ -513,6 +550,12 @@ sind dokumentiert, weil sie Feinheiten zeigen:
 - **Nach dem Flash einmal „Gewicht verworfen" ansehen.** Steht dort nach ein
   paar Intervallen etwas anderes als 0, obwohl nicht kalibriert wurde, stimmt
   etwas an der Kalibrierung nicht.
-- Unverändert offen aus den Vorsessions: `input_number.leergewicht_beute` und
-  `input_number.mindestgewicht_mit_futter` stehen weiter auf 0,0 kg;
-  Kalibrier-Sperre fehlt noch bei `Bienen: Futtervorrat kritisch`.
+- **WLAN-Signal steht bei −80 dBm** (früher −74 bis −76). Das ist genau die
+  Grenze, ab der es laut README wackelig wird. Beobachten; wenn Aussetzer
+  kommen, zuerst die Antennenlage prüfen.
+- Offen aus den Vorsessions: Kalibrier-Sperre der Automation
+  `Bienen: Futtervorrat kritisch` fehlt noch (weniger dringend, der
+  Schwellwert löst erst nach 2 h Überschreitung aus).
+- Kosmetik: Die Kachel „Gewicht verworfen" zeigt `0.0` statt `0` — die Entity
+  hat keine Einheit, HA nimmt dann die Rohdarstellung. Über die
+  Anzeigegenauigkeit in den Entity-Einstellungen zu beheben.

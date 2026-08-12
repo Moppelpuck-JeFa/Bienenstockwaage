@@ -193,8 +193,13 @@ der `make_preference()`-Aufrufe, nicht aus seinem Namen. Ein neues Global mit
 schlägt fehl und die Werte fallen auf `initial_value` zurück. Ein Global mit
 `restore_value: no` fordert gar keinen Speicher an und ist damit unkritisch.
 Das erklärt beide Vorfälle und ist der Grund, warum neue Globals nach Möglichkeit
-`restore_value: no` bekommen sollten. **Trotzdem nach jedem Flash prüfen** —
-die Ableitung stammt aus dem Quelltext, nicht aus einem Test am Gerät.
+`restore_value: no` bekommen sollten.
+
+**Am 12.08.2026 erstmals am Gerät bestätigt:** Ein Flash mit **drei** neuen
+Globals (`verworfene_gewichte`, `erste_messung_erfolgt`,
+`kalibrier_restminuten`), alle `restore_value: no`, hat die Kalibrierung
+unangetastet gelassen — Faktor vorher und nachher −20.755,91, „Kalibriert bei"
+22,2 °C. Ein Datenpunkt ist kein Beweis: **trotzdem nach jedem Flash prüfen.**
 
 ## Wo was steht
 

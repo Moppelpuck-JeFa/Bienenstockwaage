@@ -22,10 +22,16 @@ Temperaturkompensation (PR #1) und Messfenster-Mittelung sind beide nach `main`
 gemerged. Offener Branch: `claude/weight-stats-outliers-cleanup-pct5w3`
 (Plausibilitätsfenster, Kalibrier-Sperre, Statistik-Bereinigung).
 
-**Geflasht ist weiterhin der Stand vom 11.08. 19:21 Uhr.** Noch nicht auf dem
-Gerät sind: der Fix „Beim Booten keine Platzhalter-Kalibrierwerte nach HA
-senden", das Plausibilitätsfenster, der Zähler „Gewicht verworfen" und die
-Kalibrier-Sperre samt ihrer Entity.
+**Geflasht am 12.08.2026** — Plausibilitätsfenster, Zähler „Gewicht verworfen"
+und Kalibrier-Sperre sind auf dem Gerät und in HA sichtbar
+(`sensor.waage_eg_gewicht_verworfen`, `sensor.waage_eg_kalibrier_sperre`,
+beide auf der Technik-Ansicht des Dashboards).
+
+**Der Flash hat die Kalibrierung NICHT gekostet** — erstmals belegt, dass
+neue Globals mit `restore_value: no` die Preferences nicht verschieben: drei
+neue Globals, Faktor davor und danach −20.755,91, „Kalibriert bei" 22,2 °C.
+Die Regel „nach jedem Flash prüfen" bleibt trotzdem, ein Datenpunkt ist kein
+Beweis.
 
 **Die Kalibrierung ist wieder in Ordnung** — am 11.08. um 20:34 Uhr neu
 gefahren, seitdem **−20.755,9 counts/kg**, „Kalibriert bei" 22,2 °C,
@@ -532,10 +538,10 @@ Gegenprobe mit Ohmmeter: E+/E− und A+/A− müssen etwa gleich sein (~1 kΩ).
   10.08.2026**, und gleich gegen Neustart und Kalibrierung mit. Siehe Abschnitt
   "Durchsichtmodus". Offen bleibt dasselbe fuer `Bienen: Futtervorrat kritisch`
   (weniger dringend, Schwellwert loest erst nach 2 h aus).
-- `input_number.leergewicht_beute` und `input_number.mindestgewicht_mit_futter` stehen
-  beide noch auf 0,0 kg. Reale Werte eintragen (Beute leer wiegen; Mindestgewicht =
-  Beute + Bienen + Mindestfutterreserve). Bis dahin liefert `binary_sensor.futtervorrat_kritisch`
-  fälschlich "nicht kritisch".
+- ~~`input_number.leergewicht_beute` und `input_number.mindestgewicht_mit_futter`
+  stehen beide noch auf 0,0 kg.~~ **Erledigt** — stehen am 12.08.2026 auf
+  **18 kg** bzw. **29 kg**. `binary_sensor.futtervorrat_kritisch` arbeitet
+  damit gegen echte Schwellen.
 - Schwarm-Schwellwert von −3 kg/h nach der ersten echten Saison nachjustieren.
 
 **Temperaturdrift — erledigt, aber am Zielstandort zu wiederholen:**
