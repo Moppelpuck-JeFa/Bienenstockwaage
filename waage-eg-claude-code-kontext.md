@@ -18,11 +18,15 @@ sich jetzt um Feinschliff, offene Messungen und mögliche Erweiterungen — nich
 einen Neuaufbau von Null.
 
 **Repo:** `github.com/Moppelpuck-JeFa/Bienenstockwaage` (privat). **Stand: 11.08.2026.**
-Die Temperaturkompensation liegt auf dem Branch
-`claude/temperature-compensation-0l9ztn` und ist geflasht und aktiv, aber noch
-nicht nach `main` gemerged. Die Messfenster-Mittelung liegt auf
-`claude/rohwerte-messintervall-mittel-ddd3ss` und ist **noch nicht geflasht** —
-sie ist nur mit `esphome config` und dem g++-Test geprüft.
+Temperaturkompensation (PR #1) und Messfenster-Mittelung sind beide nach `main`
+gemerged; Entwicklungsbranches gibt es aktuell keine.
+
+**Geflasht ist der Stand vom 11.08. 19:21 Uhr.** Der Fix „Beim Booten keine
+Platzhalter-Kalibrierwerte nach HA senden" kam danach und ist **noch nicht auf
+dem Gerät**. Ebenfalls offen: **die Kalibrierung ist kaputt** (Faktor +753,58
+statt −18.000…−21.000, gebrochen am 11.08. um 13:59 und damit vor dem Flash) —
+beide Kalibrierschritte müssen neu gefahren werden. Details im
+[Sessionbericht 11.08., Abschnitt 10](docs/sessionbericht-2026-08-11.md).
 
 **Chronologie in den Sessionberichten** — bei "warum ist das so?" zuerst dort nachsehen:
 
