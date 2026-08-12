@@ -36,6 +36,7 @@ beide Kalibrierschritte müssen neu gefahren werden. Details im
 | [04.08.](docs/sessionbericht-2026-08-04.md) | Umstellung auf substitutions/packages, Namensschema |
 | [10.08.](docs/sessionbericht-2026-08-10.md) | Temperaturkompensation eingebaut, Schwarm-Alarm gesperrt |
 | [11.08.](docs/sessionbericht-2026-08-11.md) | Rohwerte über das Messintervall gemittelt, Diagnose "Rohwert Streuung" und "Temperatur Mittel" |
+| [12.08.](docs/sessionbericht-2026-08-12.md) | Plausibilitätsfenster 0–150 kg, Zähler "Gewicht verworfen", Bestandsaufnahme der Ausreißer in der Langzeitstatistik |
 
 **Wichtig:** Workflow-Sprache ist Deutsch — Code-Kommentare, YAML-Labels, Entity-Namen
 und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
@@ -118,6 +119,30 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   3 min auf den ersten Temperaturwert, bevor er den ersten Wert nach HA schickt
   (nur wenn die Kompensation aktiv ist). Ein defekter DS18B20 kostet damit
   3 Minuten, legt die Waage aber nicht still.
+
+### Plausibilitätsfenster des Gewichts (seit 12.08.2026)
+- Veröffentlicht wird nur, was **zwischen 0 und 150 kg** liegt
+  (`plausibel_kg_min`/`plausibel_kg_max` als substitutions, Regel in
+  `packages/waage-grenzen.h`). Alles andere wird **verworfen, nicht gekappt**.
+- **Der Grund ist die Langzeitstatistik.** `state_class: measurement` heißt:
+  jeder Wert bleibt für immer. Am 11.08.2026 gingen während der kaputten
+  Kalibrierung +2.299,4 / +1.035,3 / −3.749,7 / −48,6 kg nach HA; das
+  Stundenmittel von 18:00 UTC steht seitdem bei +70,8 kg statt ~26,7 kg.
+- **Nur das Gewicht hängt am Fenster**, die Diagnose-Entities nicht — sonst
+  ließe sich nicht mehr klären, warum der Wert fehlt.
+- Neuer Zähler **„Gewicht verworfen"** (ohne `state_class`, ohne
+  `restore_value`), sonst wäre das Verwerfen von einer ruhigen Waage nicht zu
+  unterscheiden.
+- Neues Global `erste_messung_erfolgt` ersetzt im Taktgeber die Prüfung
+  `isnan(waage_gewicht.state)`. Ohne diesen Ersatz bliebe der Taktgeber bei
+  dauerhaft unplausiblen Werten für immer im Anlauf und schlösse **jede
+  Minute** ein Messfenster ab.
+- Beide neuen Globals haben `restore_value: no` und sollten die Kalibrierung
+  daher nicht kosten — **trotzdem nach dem Flash prüfen.**
+- Preis der Untergrenze 0: eine frisch tarierte Waage kann nicht mehr −0,1 kg
+  anzeigen. Simuliert in `tests/` (Punkt 11): 0,01 % der Werte bei einem Stock
+  auf 0,0 kg, ab 0,1 kg Last keine. Für eine Driftmessung mit leerer Waage
+  `plausibel_kg_min: "-5"` setzen.
 
 ### Kritische Plattform-Fallstricke (ESP8266 / ESPHome)
 - **`restore_from_flash: true` ist ZWINGEND.** Ohne diese Zeile landen alle
@@ -340,6 +365,8 @@ Bienenstockwaage/
 │                                       #   statt dreimal (esphome: includes:)
 ├── packages/waage-mittelwert.h        # Mittelwert + Streuung des Messfensters,
 │                                       #   ebenfalls per esphome: includes:
+├── packages/waage-grenzen.h           # Plausibilitaetsfenster: welches Gewicht
+│                                       #   ueberhaupt nach HA darf
 ├── tests/waage-temperatur-test.cpp    # Prueft beide Header mit g++, ohne Hardware
 ├── waage-eg.yaml                      # Stock 1: nur substitutions + package-Include
 ├── waage-stock2.yaml                  # Stock 2, dito

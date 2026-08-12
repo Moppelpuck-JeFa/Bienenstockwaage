@@ -14,6 +14,7 @@ weitere Stöcke ohne Code-Duplizierung dazukommen (siehe
 | [`packages/waage-basis.yaml`](packages/waage-basis.yaml) | Die gesamte gemeinsame Logik - der eigentliche Code. Wird nicht direkt geflasht |
 | [`packages/waage-temperatur.h`](packages/waage-temperatur.h) | Die Formel der Temperaturkompensation, an einer Stelle statt an dreien |
 | [`packages/waage-mittelwert.h`](packages/waage-mittelwert.h) | Mittelwert und Streuung des Messfensters, aus demselben Grund ausgelagert |
+| [`packages/waage-grenzen.h`](packages/waage-grenzen.h) | Plausibilitätsfenster: welches Gewicht überhaupt nach Home Assistant darf |
 | [`waage-eg.yaml`](waage-eg.yaml) | Stock 1 "Waage eG": nur substitutions + package-Include |
 | [`waage-stock2.yaml`](waage-stock2.yaml) | Stock 2, gleiche Bauart |
 | [`waage-stock3.yaml`](waage-stock3.yaml) | Stock 3, gleiche Bauart |
@@ -25,6 +26,7 @@ weitere Stöcke ohne Code-Duplizierung dazukommen (siehe
 | [`docs/sessionbericht-2026-08-04.md`](docs/sessionbericht-2026-08-04.md) | Umstellung auf substitutions/packages, Namensschema, ESPHome-Fallstricke |
 | [`docs/sessionbericht-2026-08-10.md`](docs/sessionbericht-2026-08-10.md) | Temperaturkompensation: Auswertung über 7 Tage und Einbau |
 | [`docs/sessionbericht-2026-08-11.md`](docs/sessionbericht-2026-08-11.md) | Mittelung der Rohwerte über das Messintervall, zwei neue Diagnose-Entities |
+| [`docs/sessionbericht-2026-08-12.md`](docs/sessionbericht-2026-08-12.md) | Plausibilitätsfenster gegen Ausreißer in der Langzeitstatistik |
 | [`tests/waage-temperatur-test.cpp`](tests/waage-temperatur-test.cpp) | Prüfprogramm für die Kompensationsformel (`g++`, ohne Hardware) |
 
 `secrets.yaml` selbst ist per `.gitignore` ausgeschlossen und gehört nicht ins Repo.
@@ -78,6 +80,11 @@ Details zur Verdrahtung und zum Rest der Deep-Sleep-Vorbereitung:
   Temperatur; an "Waage eG" gemessene **+32,5 g/K** werden aus dem Gewicht
   herausgerechnet. Der Koeffizient ist aus HA einstellbar, `0` schaltet die
   Kompensation ab. Siehe unten.
+- **Plausibilitätsfenster 0 bis 150 kg** — was außerhalb liegt, geht gar nicht
+  erst nach Home Assistant. Solche Werte kommen nie aus dem Volk, sondern aus
+  einer halben Kalibrierung, und sie stünden sonst dauerhaft in der
+  Langzeitstatistik. Der Zähler „Gewicht verworfen" macht sichtbar, dass es
+  passiert ist. Siehe unten
 - **Verbindungsstatus und WLAN-Signal** als Diagnose — damit ein Ausfall
   auffällt, statt dass die Sensoren still ihren letzten Wert behalten
 - Fallback-Hotspot, OTA-Updates, Webserver auf Port 80
@@ -471,6 +478,78 @@ Lastwechsel. In der Messreihe steckt ein davon herrührender Anteil von
 besten vor Sonnenaufgang. Das kürzt den Tagesgang ohnehin weitgehend heraus.
 Der Helfer "Waage Tagesbilanz" (`statistics`/`change`/24 h) macht genau das
 und funktioniert mit und ohne Kompensation.
+
+## Plausibilitätsfenster: was gar nicht erst nach HA geht
+
+Die Waage veröffentlicht ein Gewicht nur, wenn es **zwischen 0 und 150 kg**
+liegt. Alles andere wird verworfen — die Entity „Gewicht" behält dann ihren
+letzten guten Wert, und der Zähler „Gewicht verworfen" zählt eins hoch.
+
+**Warum überhaupt.** `sensor.waage_eg_gewicht` hat `state_class: measurement`,
+jeder veröffentlichte Wert landet damit **dauerhaft in der Langzeitstatistik**.
+Der Zustandsverlauf wird nach rund 10 Tagen aufgeräumt, die Statistik nie. Am
+11.08.2026 gingen während einer kaputten Kalibrierung nacheinander
+**+2.299,4 kg, +1.035,3 kg, −3.749,7 kg und −48,6 kg** nach HA. Das
+Stundenmittel dieser Stunde steht seitdem bei **+70,8 kg** statt bei den
+tatsächlichen ~26,7 kg, und jede `statistics-graph`-Karte skaliert auf
+±3.750 kg — die echte Messreihe wird darin zu einer flachen Linie.
+Herausrechnen lässt sich das hinterher nur noch von Hand.
+
+**Warum verwerfen und nicht kappen.** Ein auf 150,0 kg gekappter Wert wäre eine
+Behauptung über das Volk, die genauso falsch ist wie die 2.299 — nur
+unauffälliger. Ein fehlender Wert ist ehrlich.
+
+**Was weiterhin gesendet wird:** Rohwert, Rohwert-Streuung, Temperatur,
+Temperatur Mittel, Kalibrierfaktor, „Kalibriert bei"/„mit" und
+Temperaturkorrektur. Genau die braucht man, um herauszufinden, warum das
+Gewicht fehlt — deshalb hängen sie nicht mit am Fenster.
+
+### Die Grenzen ändern
+
+Beide stehen als `substitutions` in
+[`packages/waage-basis.yaml`](packages/waage-basis.yaml) und lassen sich pro
+Stock in dessen Datei überschreiben:
+
+```yaml
+substitutions:
+  plausibel_kg_min: "0"
+  plausibel_kg_max: "150"
+```
+
+`plausibel_kg_max` kleiner oder gleich `plausibel_kg_min` **schaltet die Prüfung
+ab** (dann geht alles außer NAN durch).
+
+**Die Untergrenze 0 hat einen Preis, und der ist Absicht:** Steht die Waage
+frisch tariert bei null, ist −0,1 kg ein *echter* Messwert — und der bleibt
+jetzt aus. Werte zwischen −0,05 und 0 sind nicht betroffen, die runden schon in
+der Anzeige auf 0,0. Wie oft es bei 14 g Rauschen wirklich zuschlägt, rechnet
+das Prüfprogramm aus (Punkt 11): bei einem Stock auf 0,0 kg rund **0,01 %** der
+Werte, ab 0,1 kg Last **gar keine**. Wer die Null-Umgebung sauber sehen will —
+etwa für eine Driftmessung mit leerer, tarierter Waage — setzt
+`plausibel_kg_min: "-5"`.
+
+### „Gewicht verworfen" lesen
+
+| Anzeige | Bedeutung |
+|---|---|
+| 0 | Normalfall. Alles, was gemessen wurde, ist auch in HA. |
+| einzelne Werte, direkt nach dem Kalibrieren | Erwartbar: zwischen „Kalibrieren 0kg" und „Kalibrieren Referenzgewicht" stimmt der Span nicht. |
+| steigt im Takt des Messintervalls | Die Kalibrierung ist kaputt. Kalibrierfaktor prüfen (Erwartung −18.000 bis −21.000) und **beide** Schritte neu fahren. |
+
+Der Zähler beginnt nach jedem Neustart wieder bei 0 und hat bewusst **keine**
+`state_class` — er ist kein Messwert und gehört nicht in die Langzeitstatistik.
+Warum ein Wert verworfen wurde, steht mit Rohwert im Log:
+
+```
+[W][waage]: Gewicht -2311.7 kg verworfen - ausserhalb von 0.0..150.0 kg
+            (Kalibrierung pruefen! roh -599434.0, 1. Mal seit dem Neustart)
+```
+
+> **Die Statistik von vor dem Umbau bereinigt das nicht.** Das Fenster wirkt ab
+> dem Flash; die Ausreißer, die schon in der Langzeitstatistik stehen, bleiben
+> dort stehen. Siehe
+> [`docs/sessionbericht-2026-08-12.md`](docs/sessionbericht-2026-08-12.md),
+> Abschnitt „Die Altlast in der Statistik".
 
 ## Fehlersuche: die Waage misst Unsinn
 

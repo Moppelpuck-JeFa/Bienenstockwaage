@@ -81,6 +81,29 @@ substitutions:
   # Koeffizient gemessen ist.
   start_temp_koeffizient: "32.5"    # g/K
 
+  # --- Plausibilitaetsfenster des veroeffentlichten Gewichts ---
+  # Was ausserhalb liegt, geht NICHT nach HA. Begruendung und die genaue
+  # Regel stehen in packages/waage-grenzen.h; kurz: solche Werte kommen nie
+  # aus dem Volk, sondern aus einer halben Kalibrierung, und sie stehen wegen
+  # state_class: measurement dauerhaft in der Langzeitstatistik.
+  #
+  # 0 kg unten: Ein Stock kann nicht weniger als nichts wiegen. ACHTUNG, das
+  # ist eine bewusste Einschraenkung - unmittelbar nach einem Tara rauscht die
+  # Anzeige um die Null, und -0,1 kg ist dort ein ECHTER Messwert. Der bleibt
+  # jetzt aus, die Entity haelt so lange ihren letzten Stand. Wer die
+  # Null-Umgebung sauber sehen will (Driftmessung mit tarierter Waage), setzt
+  # hier z. B. "-5". Werte zwischen -0,05 und 0 sind nicht betroffen: sie
+  # runden auf -0,0 und werden schon in der Anzeige zu 0,0.
+  #
+  # 150 kg oben: Beute, Volk, Honig und Futter zusammen bleiben deutlich
+  # darunter (4x50 kg Zellen, mechanisches Limit 200 kg). Der Wert ist
+  # absichtlich grosszuegig - er soll Rechenfehler fangen, nicht ein starkes
+  # Volk in der Tracht.
+  #
+  # plausibel_kg_max <= plausibel_kg_min schaltet die Pruefung ganz ab.
+  plausibel_kg_min: "0"
+  plausibel_kg_max: "150"
+
 esphome:
   name: ${geraete_name}
   friendly_name: "${anzeige_name}"
@@ -93,6 +116,8 @@ esphome:
     # Mittelwert und Streuung des Messfensters, aus demselben Grund ausgelagert
     # wie die Temperaturformel: reine Zahlen, kein id(), mit g++ pruefbar.
     - packages/waage-mittelwert.h
+    # Plausibilitaetsfenster des Gewichts, ebenfalls testbar gehalten
+    - packages/waage-grenzen.h
 
 esp8266:
   board: ${board}
@@ -283,6 +308,38 @@ globals:
     restore_value: no
     initial_value: 'NAN'
 
+  # ---------------------------------------------------------------------
+  # Plausibilitaetspruefung des Gewichts
+  # ---------------------------------------------------------------------
+  # Beide bewusst OHNE restore_value - aus zwei Gruenden: ein Flash mit einem
+  # neuen restore_value-Global verschiebt den Speicherplatz aller
+  # nachfolgenden und kostet die Kalibrierung (03.08. und 10.08.2026 real
+  # passiert, Herleitung in CLAUDE.md), und beide Werte sollen nach einem
+  # Neustart ohnehin von vorn anfangen.
+  #
+  # Zaehlt die Messwerte, die das Plausibilitaetsfenster verworfen hat.
+  # Ohne ihn waere das Verwerfen unsichtbar: die Entity "Gewicht" behaelt
+  # einfach ihren letzten Stand, und das sieht in HA genau wie eine ruhige
+  # Waage aus. Genau diese Verwechslung soll der Zaehler ausschliessen.
+  - id: verworfene_gewichte
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  # "Es gab schon einmal einen echten Messwert."
+  #
+  # Ersetzt die fruehere Pruefung auf isnan(waage_gewicht.state) im
+  # Taktgeber. Die ging davon aus, dass ein leeres Gewicht nur "noch nicht
+  # gemessen" heissen kann - seit der Plausibilitaetspruefung heisst es
+  # womoeglich "dauerhaft unplausibel", und der Taktgeber wuerde dann bis in
+  # alle Ewigkeit jede Minute ein Messfenster abschliessen und die
+  # Diagnose-Entities veroeffentlichen. Gesetzt wird der Wert, sobald ein
+  # Rohwert-Mittel vorliegt, also unabhaengig davon, ob das Gewicht selbst
+  # durch die Pruefung kommt.
+  - id: erste_messung_erfolgt
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
 # --- 1-Wire-Bus für den Temperatursensor ---
 # DS18B20 an D5 (GPIO14). D1/D2 sind vom HX711 belegt, D4 wäre GPIO2 und
 # damit ein Boot-Strapping-Pin - deshalb D5.
@@ -384,6 +441,11 @@ sensor:
       if (std::isnan(raw)) {
         return {};
       }
+      // Ab hier steht fest: es gab eine echte Messung. Der Taktgeber unten
+      // haengt daran, ob er noch im Anlauf ist - bewusst hier und nicht erst
+      // nach der Plausibilitaetspruefung, sonst liefe er bei dauerhaft
+      // unplausiblen Werten fuer immer im Minutentakt.
+      id(erste_messung_erfolgt) = true;
       float span = id(calib_raw_ref) - id(calib_raw_zero);
       float kg = 0.0;
       // Schutz, falls noch nicht kalibriert wurde (Division durch 0)
@@ -407,9 +469,33 @@ sensor:
       // 0.1 ist binär nicht exakt darstellbar, der Umweg über die 10 ist
       // numerisch sauberer.
       float gerundet = std::round(kg * 10.0f) / 10.0f;
-      // Verhindert, dass bei minimal negativem Rohwert "-0.0" in HA landet
+      // Verhindert, dass bei minimal negativem Rohwert "-0.0" in HA landet.
+      // Nebenwirkung und Absicht zugleich: das leichte Rauschen um die Null
+      // direkt nach einem Tara faellt damit nicht unter die Untergrenze.
       if (std::fabs(gerundet) < 0.001f) {
         gerundet = 0.0f;
+      }
+      // --- Plausibilitaetsfenster ---
+      // Letzte Station vor Home Assistant. Was hier haengenbleibt, stammt aus
+      // einer kaputten oder halben Kalibrierung und nicht aus dem Stock; es
+      // wuerde wegen state_class: measurement dauerhaft in der
+      // Langzeitstatistik stehen. Die Regel steht in
+      // packages/waage-grenzen.h, die Grenzen in den substitutions oben.
+      //
+      // Gar nichts veroeffentlichen, nicht kappen: die Entity behaelt ihren
+      // letzten guten Wert, und der Zaehler unten macht sichtbar, dass etwas
+      // verworfen wurde. Rohwert, Streuung und Temperatur gehen weiterhin
+      // raus - genau die braucht man, um herauszufinden, warum.
+      if (!waage_gewicht_plausibel(gerundet, ${plausibel_kg_min},
+                                   ${plausibel_kg_max})) {
+        id(verworfene_gewichte)++;
+        ESP_LOGW("waage", "Gewicht %.1f kg verworfen - ausserhalb von "
+                          "%.1f..%.1f kg (Kalibrierung pruefen! roh %.1f, "
+                          "%u. Mal seit dem Neustart)",
+                 gerundet, (float) ${plausibel_kg_min},
+                 (float) ${plausibel_kg_max}, raw,
+                 (unsigned) id(verworfene_gewichte));
+        return {};
       }
       return gerundet;
 
@@ -620,6 +706,28 @@ sensor:
     entity_category: diagnostic
     update_interval: never
     lambda: 'return id(calib_kg_ref);'
+
+  # Wie oft das Plausibilitaetsfenster einen Messwert verworfen hat, seit die
+  # Waage zuletzt gestartet ist.
+  #
+  # WOZU: Ein verworfener Wert ist sonst unsichtbar - "Gewicht" behaelt
+  # einfach seinen letzten Stand, und das sieht in HA aus wie eine ruhige
+  # Waage. Steht hier etwas anderes als 0, ist die Anzeige aelter als der
+  # Zeitstempel der Betriebszeit vermuten laesst, und die Kalibrierung ist
+  # der erste Verdaechtige (Kalibrierfaktor gegen -18.000 bis -21.000
+  # pruefen). Warum es passiert ist, steht im Log - dort mit Rohwert.
+  #
+  # Bewusst OHNE state_class: das ist kein Messwert, sondern ein Zaehler, der
+  # bei jedem Neustart bei 0 anfaengt. In der Langzeitstatistik haette er
+  # nichts zu suchen.
+  - platform: template
+    id: gewicht_verworfen
+    name: "Gewicht verworfen"
+    icon: "mdi:filter-remove-outline"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: never
+    lambda: 'return id(verworfene_gewichte);'
 
   # Wird zusammen mit dem Gewicht aktualisiert - dadurch sieht man in HA
   # am Zeitstempel dieser Entity, wann die letzte Messung durchlief
@@ -1100,6 +1208,7 @@ script:
           id(kalibriert_mit).update();
           id(kalibriert_bei).update();
           id(temperaturkorrektur).update();
+          id(gewicht_verworfen).update();
 
   - id: durchsicht_starten
     mode: restart
@@ -1213,8 +1322,16 @@ interval:
 
           // Solange noch nie ein Gewicht veröffentlicht wurde (frisch
           // gebootet), jede Minute erneut versuchen - dann steht der erste
-          // Wert nach ~1 min in HA statt erst nach einem vollen Intervall
-          bool noch_kein_wert = std::isnan(id(waage_gewicht).state);
+          // Wert nach ~1 min in HA statt erst nach einem vollen Intervall.
+          //
+          // Gefragt wird das Global, NICHT mehr isnan(waage_gewicht.state):
+          // seit der Plausibilitaetspruefung kann die Entity auch dauerhaft
+          // leer bleiben (kaputte Kalibrierung), und dann haette diese
+          // Bedingung den Anlauf nie verlassen - das Messfenster wuerde jede
+          // Minute abgeschlossen und die Diagnose-Entities im Minutentakt
+          // veroeffentlicht, also genau in dem Moment am meisten Funk und
+          // Rechnung, in dem die Waage ohnehin schon nicht misst.
+          bool noch_kein_wert = !id(erste_messung_erfolgt);
 
           if (id(minuten_seit_messung) >= soll || noch_kein_wert) {
             id(minuten_seit_messung) = 0;

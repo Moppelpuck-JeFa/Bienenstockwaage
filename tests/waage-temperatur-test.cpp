@@ -21,6 +21,7 @@
 
 #include "../packages/waage-temperatur.h"
 #include "../packages/waage-mittelwert.h"
+#include "../packages/waage-grenzen.h"
 
 #include <algorithm>
 #include <cmath>
@@ -64,12 +65,25 @@ static float gewicht_ungerundet(const Waage &w, float raw) {
   return kg;
 }
 
-// 1:1 der Lambda-Koerper von sensor "waage_gewicht"
+// 1:1 der Lambda-Koerper von sensor "waage_gewicht", aber OHNE das
+// Plausibilitaetsfenster - das prueft veroeffentlichtes_gewicht() unten.
+// Getrennt, weil die Punkte 2 bis 10 den Rechenweg pruefen und nicht die
+// Frage, ob das Ergebnis noch nach HA darf.
 static float gewicht(const Waage &w, float raw) {
   float kg = gewicht_ungerundet(w, raw);
   if (std::isnan(kg)) return NAN;
   float gerundet = std::round(kg * 10.0f) / 10.0f;
   if (std::fabs(gerundet) < 0.001f) gerundet = 0.0f;
+  return gerundet;
+}
+
+// 1:1 der Lambda-Koerper von sensor "waage_gewicht", vollstaendig - also
+// inklusive Plausibilitaetsfenster. NAN heisst hier "return {}", die Entity
+// behaelt in HA ihren letzten Wert.
+static float veroeffentlichtes_gewicht(const Waage &w, float raw,
+                                       float untergrenze, float obergrenze) {
+  float gerundet = gewicht(w, raw);
+  if (!waage_gewicht_plausibel(gerundet, untergrenze, obergrenze)) return NAN;
   return gerundet;
 }
 
@@ -488,6 +502,117 @@ int main() {
                neu * 3.0 < alt ? 1.0 : 0.0, 1.0, 0.5);
         std::printf("   6-h-Fenster: Streuung der Rohwerte %.0f counts "
                     "(~%.0f g)\n", streuung, streuung / 20.874);
+      }
+    }
+  }
+
+  std::printf("\n== 11. Plausibilitaetsfenster des Gewichts ==\n");
+  {
+    // Die Grenzen aus den substitutions von waage-basis.yaml.
+    const float unten = 0.0f, oben = 150.0f;
+
+    // --- Die Regel selbst ---
+    pruefe("0,0 kg ist plausibel (Grenze einschliesslich)",
+           waage_gewicht_plausibel(0.0f, unten, oben), 1.0, 0.5);
+    pruefe("150,0 kg ist plausibel (Grenze einschliesslich)",
+           waage_gewicht_plausibel(150.0f, unten, oben), 1.0, 0.5);
+    pruefe("35,8 kg (Istwert waage-eg) ist plausibel",
+           waage_gewicht_plausibel(35.8f, unten, oben), 1.0, 0.5);
+    pruefe("-0,1 kg faellt heraus",
+           waage_gewicht_plausibel(-0.1f, unten, oben), 0.0, 0.5);
+    pruefe("150,1 kg faellt heraus",
+           waage_gewicht_plausibel(150.1f, unten, oben), 0.0, 0.5);
+    pruefe("NAN faellt heraus",
+           waage_gewicht_plausibel(NAN, unten, oben), 0.0, 0.5);
+
+    // Die vier Werte, die am 11.08.2026 um 20:27-20:33 wirklich nach HA
+    // gingen und das Stundenmittel dieser Stunde auf +70,8 kg gezogen haben.
+    // Genau dafuer gibt es dieses Fenster.
+    for (float ausreisser : {2299.4f, 1035.3f, -3749.7f, -48.6f}) {
+      pruefe("realer Ausreisser vom 11.08. faellt heraus",
+             waage_gewicht_plausibel(ausreisser, unten, oben), 0.0, 0.5);
+    }
+
+    // --- Abschalten der Pruefung ---
+    pruefe("Obergrenze <= Untergrenze schaltet die Pruefung ab",
+           waage_gewicht_plausibel(-3749.7f, 0.0f, 0.0f), 1.0, 0.5);
+    pruefe("Grenzen als NAN schalten die Pruefung ab",
+           waage_gewicht_plausibel(-3749.7f, NAN, NAN), 1.0, 0.5);
+    pruefe("abgeschaltet heisst trotzdem: kein NAN nach HA",
+           waage_gewicht_plausibel(NAN, NAN, NAN), 0.0, 0.5);
+
+    // --- Im Zusammenspiel mit der Anzeige ---
+    {
+      Waage w;
+      w.mittel_temperatur = w.calib_temp;   // Korrektur = 0, stoert hier nur
+
+      // Normalbetrieb: was der Stock ueber den Temperaturhub wiegt, kommt
+      // vollstaendig durch.
+      for (float t = 15.0f; t <= 35.001f; t += 5.0f) {
+        Waage v = w;
+        v.mittel_temperatur = t;
+        float raw = roh_fuer(v, 30.0f, t);
+        pruefe("30 kg gehen bei jeder Temperatur nach HA",
+               veroeffentlichtes_gewicht(v, raw, unten, oben), 30.0f, 0.051f);
+      }
+
+      // Der Grenzfall direkt nach einem Tara: -0,04 kg rundet auf -0,0 und
+      // wird schon in der Anzeige zu 0,0 - die Untergrenze sieht ihn also
+      // gar nicht. Erst ab -0,05 kg faellt der Wert wirklich aus.
+      pruefe("-0,04 kg wird zu 0,0 und kommt durch",
+             veroeffentlichtes_gewicht(w, roh_fuer(w, -0.04f, w.calib_temp),
+                                       unten, oben), 0.0f, 1e-6f);
+      pruefe("-0,06 kg faellt aus (Preis der Untergrenze 0)",
+             veroeffentlichtes_gewicht(w, roh_fuer(w, -0.06f, w.calib_temp),
+                                       unten, oben), NAN, 1e-6f);
+      pruefe("mit Untergrenze -5 kommt -0,1 kg wieder durch",
+             veroeffentlichtes_gewicht(w, roh_fuer(w, -0.06f, w.calib_temp),
+                                       -5.0f, oben), -0.1f, 1e-6f);
+
+      // Die halbe Kalibrierung - der Fall, der das Fenster ueberhaupt noetig
+      // macht. Nullpunkt frisch gesetzt, Referenzpunkt noch der alte:
+      // der Span schrumpft auf ein paar hundert counts (die Span-Pruefung im
+      // Kalibrier-Button greift ab 500 nicht mehr), der Umrechnungsfaktor
+      // explodiert und die Anzeige laeuft in die Tausende - genau wie am
+      // 11.08.2026 beobachtet.
+      Waage kaputt = w;
+      kaputt.calib_raw_ref = kaputt.calib_raw_zero + 600.0f;
+      float raw_30kg = roh_fuer(w, 30.0f, w.calib_temp);
+      float unsinn = gewicht(kaputt, raw_30kg);
+      std::printf("   halbe Kalibrierung (Span 600 counts): Anzeige %.1f kg\n",
+                  unsinn);
+      pruefe("halbe Kalibrierung wird verworfen",
+             veroeffentlichtes_gewicht(kaputt, raw_30kg, unten, oben), NAN,
+             1e-6f);
+      pruefe("... und zwar weit ausserhalb, nicht knapp",
+             std::fabs(unsinn) > 1000.0f ? 1.0 : 0.0, 1.0, 0.5);
+    }
+
+    // --- Was die Untergrenze im Normalbetrieb kostet ---
+    // Sie greift nur, wenn die Waage ohnehin um die Null steht (frisch
+    // tariert, nichts aufgelegt). Wie oft sie dort zuschlaegt, haengt am
+    // Rauschen des Fenstermittels: 14 g entsprechen 300 counts Rauschen je
+    // Sekundenwert, also dem, was Punkt 10 zugrunde legt - und das ist der
+    // ungefilterte Fall, ein 6-h-Mittel rauscht deutlich weniger.
+    {
+      std::mt19937 rng(20260812);
+      const int zuege = 20000;
+      std::printf("   Anteil verworfener Werte bei sigma = 14 g:\n");
+      for (double mittel : {0.0, 0.1, 0.5, 2.0}) {
+        std::normal_distribution<double> rauschen(mittel, 0.014);
+        int raus = 0;
+        for (int i = 0; i < zuege; i++) {
+          float kg = (float) rauschen(rng);
+          float gerundet = std::round(kg * 10.0f) / 10.0f;
+          if (std::fabs(gerundet) < 0.001f) gerundet = 0.0f;
+          if (!waage_gewicht_plausibel(gerundet, unten, oben)) raus++;
+        }
+        std::printf("     Stock bei %4.1f kg   %5.2f %%\n", mittel,
+                    100.0 * raus / zuege);
+        if (mittel >= 0.1) {
+          pruefe("ab 0,1 kg Last verwirft die Untergrenze nichts mehr",
+                 raus, 0.0, 0.5);
+        }
       }
     }
   }

@@ -108,6 +108,25 @@ Daraus folgen drei Regeln:
 **Kalibrierung lebt in `globals`** mit `restore_value`, nicht in
 `calibrate_linear`. Zwei-Punkt-Kalibrierung über Buttons aus HA.
 
+**Das Gewicht läuft vor dem Veröffentlichen durch ein Plausibilitätsfenster**
+(`plausibel_kg_min`/`plausibel_kg_max`, Vorgabe 0 bis 150 kg; Regel in
+`packages/waage-grenzen.h`). Der Grund ist nicht Kosmetik: `waage_gewicht` hat
+`state_class: measurement`, ein Ausreißer steht damit **dauerhaft** in der
+Langzeitstatistik, während der Zustandsverlauf nach ~10 Tagen wegfällt. Am
+11.08.2026 zog eine kaputte Kalibrierung (+2.299 / −3.749 kg) das Stundenmittel
+auf +70,8 kg. Daraus folgt:
+
+- **Unplausibles wird verworfen, nicht gekappt** — ein Wert von 150,0 kg wäre
+  genauso falsch, nur unauffälliger. Die Entity behält ihren letzten Stand.
+- **Nur das Gewicht hängt am Fenster.** Rohwert, Streuung und Temperatur gehen
+  weiter raus; ohne sie ließe sich nicht klären, warum das Gewicht fehlt.
+- **Der Taktgeber fragt `erste_messung_erfolgt`, nicht mehr
+  `isnan(waage_gewicht.state)`.** Sonst käme er bei dauerhaft unplausiblen
+  Werten nie aus dem Anlauf und schlösse jede Minute ein Messfenster ab.
+- Die Untergrenze 0 kostet die echten −0,1-kg-Werte einer frisch tarierten
+  Waage. Belegt in `tests/`, Punkt 11: 0,01 % der Werte bei einem Stock auf
+  0,0 kg, ab 0,1 kg Last gar keine.
+
 **Die Temperaturkompensation steht in `packages/waage-temperatur.h`** — genau
 einmal, weil sie an drei Stellen gebraucht wird (Gewicht, Tara,
 Diagnose-Entity). Die Funktion nimmt reine Zahlen und kennt keine `id()`; nur
