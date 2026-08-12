@@ -549,10 +549,12 @@ Warum ein Wert verworfen wurde, steht mit Rohwert im Log:
             (Kalibrierung pruefen! roh -599434.0, 1. Mal seit dem Neustart)
 ```
 
-> **Das Fenster wirkt erst ab dem Flash.** Die Ausreißer, die am 12.08.2026
-> schon in der Langzeitstatistik standen, wurden separat entfernt — zwölf
-> Stundenzeilen, neun davon aus den Rohdaten neu gerechnet, drei ersatzlos
-> gestrichen. Ablauf, Sicherung der alten Werte und die Prüfung stehen in
+> **Das Fenster fängt nicht alles.** Während einer Kalibrierung liefert die
+> Waage *plausible*, aber ungültige Werte — das Referenzgewicht auf der
+> Waagschale ist von einem echten Stockgewicht nicht zu unterscheiden. Die
+> Langzeitstatistik von `waage-eg` wurde deshalb am 12.08.2026 zusätzlich
+> **zeitbasiert** geschnitten: sie beginnt mit der aktuell gültigen
+> Kalibrierung (11.08.2026, 20:34 Uhr). Begründung und Ablauf in
 > [`docs/sessionbericht-2026-08-12.md`](docs/sessionbericht-2026-08-12.md),
 > Abschnitt „Die Altlast in der Statistik".
 

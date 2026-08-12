@@ -313,6 +313,42 @@ Die alten Werte aller 251 Zeilen liegen als Abschrift vor (Abschnitt oben plus
 die Tabelle der belasteten Zeilen); ein Zurückrollen wäre also möglich, wenn
 sich doch noch etwas als falsch herausstellt.
 
+### Nachtrag: der wertbasierte Schnitt hat nicht gereicht
+
+Danach war kein Wert mehr außerhalb von 0…150 kg — und das Diagramm sah
+trotzdem falsch aus. **Das ist die eigentliche Lehre dieser Session:**
+
+| Zeitraum (Ortszeit) | was in der Reihe stand | Ursache |
+|---|---|---|
+| 10.08. 14–17 Uhr | Einbrüche auf 0,0 kg, dann 3,3 | Tara + Nullpunkt-Kalibrierung |
+| 10.08. 21–23 Uhr | 0,0 … 10,6 kg | Tara-Versuche |
+| 11.08. 08–11 Uhr | 9,9 → 27,2 → 57,1 kg | Referenzgewicht aufgelegt |
+| 11.08. 12–14 Uhr | Einbrüche auf 0,0, Spitze 40,1 | weitere Versuche |
+| 11.08. 18–20 Uhr | 0,0 / 39,1 / 40,4 / 33,5 | Neukalibrierung |
+
+**Während einer Kalibrierung liefert die Waage plausible, aber ungültige
+Werte.** 57 kg sind für einen Stock völlig normal — keine wertbasierte Regel
+der Welt trennt das vom Referenzgewicht auf der Waagschale. Das
+Plausibilitätsfenster fängt den kaputten Rechenweg, nicht den falschen
+Messgegenstand.
+
+Dazu kommt ein zweites Argument, das schwerer wiegt: **ein Gewichtsverlauf ist
+nur innerhalb EINER Kalibrierung vergleichbar.** Jede Neukalibrierung ist ein
+Sprung in der Bezugsgröße, kein Ereignis am Stock.
+
+Deshalb ist die Reihe am Ende **zeitbasiert** geschnitten worden: alles vor der
+aktuell gültigen Kalibrierung (11.08.2026, 20:34 Uhr Ortszeit, Faktor
+−20.756) wurde verworfen. Übrig bleiben 11 Stundenzeilen ab 21:00 Uhr; die
+Reihe wächst von da an. Die 12 Tage davor stammen aus zwei anderen
+Kalibrierungen und aus wechselnden Prüflasten — als Messreihe waren sie
+ohnehin nichts wert.
+
+Damit ist auch die aufwendige Rekonstruktion der neun Stundenzeilen weiter
+oben hinfällig geworden. Sie steht hier trotzdem, weil das Verfahren stimmt
+und beim nächsten Mal gebraucht werden kann — und weil die Reihenfolge lehrt,
+in welcher Reihenfolge man besser fragt: **erst „ist dieser Zeitraum überhaupt
+eine Messung?", dann „ist dieser Wert plausibel?"**
+
 ---
 
 ## 6. Das Dashboard zeigte die Ausreißer weiter — warum
@@ -364,22 +400,23 @@ Die Karte „Rohwert + Temperatur 72 h" bleibt bewusst ein `history-graph`:
 sie war nie betroffen, und für die Fehlersuche ist die volle Auflösung der
 Punkt.
 
-### Zwei Reste, die von selbst verschwinden
+### Die Trend-Kachel
 
-- **Die Trend-Kachel „Gewicht" auf der Übersicht** zeigt den Ausschlag noch.
-  Das Kachel-Feature `trend-graph` kann nur den Zustandsverlauf lesen, es
-  gibt keine Statistik-Variante davon. Bei `hours_to_show: 48` ist die
-  Kachel am **13.08. abends** von selbst sauber. Das Feature dafür dauerhaft
-  zu entfernen wäre der schlechtere Tausch.
-- **Die Kachelwerte „Bilanz 24 h" und „Änderung"** stehen noch auf 25,9 kg
-  und 44,47 kg/d. Das sind keine Diagramme, sondern die aktuellen Zustände
-  der Helfer, die ihr eigenes Fenster (24 h bzw. 6 h) noch über den
-  Kalibriersprung hinweg rechnen. Sie normalisieren sich innerhalb dieses
-  Fensters.
+Das Kachel-Feature `trend-graph` kann **nur** den Zustandsverlauf lesen, eine
+Statistik-Variante davon gibt es nicht. Es blieb damit als einziges Element
+schmutzig, nachdem alles andere sauber war.
 
-Der Zustandsverlauf selbst bleibt unangetastet und wird vom Recorder nach
-10 Tagen aufgeräumt — die letzten Ausreißer fallen damit um den **21.08.**
-heraus.
+Gelöst durch `recorder.purge_entities` mit `keep_days: 0` für
+`sensor.waage_eg_gewicht`: der Zustandsverlauf der Entity ist damit leer und
+baut sich neu auf. Das war vertretbar, weil der Zustandsverlauf ohnehin nach
+10 Tagen verfällt und die Langzeitstatistik der Archivspeicher ist — die
+Rohdaten hatten ihren Zweck (die Rekonstruktion in Abschnitt 5) da schon
+erfüllt.
+
+**Was nicht angefasst wurde:** Die Kachelwerte „Bilanz 24 h" (25,9 kg) und
+„Änderung" (44,47 kg/d) sind keine Diagramme, sondern die aktuellen Zustände
+der Helfer. Sie rechnen ihr Fenster (24 h bzw. 6 h) noch über den
+Lastwechsel von heute früh — das ist ein echtes Ereignis, kein Artefakt.
 
 ---
 
@@ -390,11 +427,17 @@ heraus.
   −20.755,9) und **„Kalibriert bei"** (aktuell 22,2 °C) auf „nicht leer".
   Beide neuen Globals sind `restore_value: no`, es sollte also nichts
   passieren — geprüft ist das erst am Gerät.
-- **Die Statistikkarten im Dashboard einmal ansehen.** Sie skalierten bisher
-  auf ±3.750 kg; das sollte jetzt weg sein. Der Helfer „Waage Tagesbilanz"
-  (`statistics`/`change`/24 h) rechnet dagegen gegen den *Zustandsverlauf*,
-  nicht gegen die Langzeitstatistik — dort stecken die Ausreißer noch bis zur
-  nächsten Recorder-Aufräumung.
+- **Kalibrieren sollte die Veröffentlichung sperren.** Der Durchsichtmodus
+  löst genau dieses Problem für die Durchsicht — für die Kalibrierung gibt es
+  nichts Vergleichbares, obwohl der Schaden derselbe ist: plausibel
+  aussehende Werte, die keine Messung sind, dauerhaft in der Statistik. Ein
+  Nachlauf analog zum Durchsicht-Nachlauf (die drei Kalibrier-/Tara-Buttons
+  setzen ihn, er sperrt das Veröffentlichen für ein paar Minuten) wäre die
+  naheliegende Lösung. **Nicht umgesetzt** — das ist ein eigener Entwurf,
+  kein Nebenprodukt dieser Session.
+- **Die Reihe ist jetzt kurz.** Sie beginnt am 11.08. um 21:00 Uhr. Wer in
+  den nächsten Tagen auf die 30-Tage-Karte sieht, sieht fast nichts — das ist
+  richtig so und kein Fehler.
 - **Nach dem Flash einmal „Gewicht verworfen" ansehen.** Steht dort nach ein
   paar Intervallen etwas anderes als 0, obwohl nicht kalibriert wurde, stimmt
   etwas an der Kalibrierung nicht.

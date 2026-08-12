@@ -139,14 +139,21 @@ und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
   Minute** ein Messfenster ab.
 - Beide neuen Globals haben `restore_value: no` und sollten die Kalibrierung
   daher nicht kosten — **trotzdem nach dem Flash prüfen.**
-- **Die Altlast in der Statistik ist am 12.08.2026 bereinigt worden**: zwölf
-  belastete Stundenzeilen, neun aus den Rohdaten neu gerechnet, drei (03.08.,
-  Rohdaten weg) ersatzlos gestrichen. Weg: `recorder/clear_statistics` +
-  `recorder/import_statistics` über die ws-Schnittstelle, alle sauberen Zeilen
-  unverändert zurückgeschrieben. **HA mittelt je 5-Minuten-Topf zeitgewichtet
-  und nimmt das arithmetische Mittel der Töpfe** — wer Statistikzeilen
+- **Die Langzeitstatistik von `sensor.waage_eg_gewicht` beginnt am 11.08.2026
+  um 21:00 Uhr** — alles davor wurde am 12.08. verworfen. Erst wurde
+  wertbasiert bereinigt (nichts mehr außerhalb 0…150 kg), das reichte aber
+  nicht: **während einer Kalibrierung liefert die Waage plausible, aber
+  ungültige Werte** (Referenzgewicht auf der Waagschale = 57 kg), und ein
+  Gewichtsverlauf ist ohnehin nur innerhalb EINER Kalibrierung vergleichbar.
+  Reihenfolge der Fragen also: erst „ist dieser Zeitraum eine Messung?", dann
+  „ist dieser Wert plausibel?".
+- Werkzeugwissen dazu: Einzelne Statistikzeilen löschen kann HA **nicht** —
+  nur `recorder/clear_statistics` (ganze Reihe) und
+  `recorder/import_statistics` (überschreiben/neu anlegen), beide über
+  `ha_call_service(ws_command=...)`. **HA mittelt je 5-Minuten-Topf
+  zeitgewichtet und nimmt das arithmetische Mittel der Töpfe**, der
+  Trägerzustand der Vorstunde zählt mit (auch in Min/Max) — wer Zeilen
   nachrechnet, muss das treffen, sonst schreibt er still falsche Geschichte.
-  Einzelne Statistikzeilen löschen kann HA nicht.
 - **`history-graph` und das Kachel-Feature `trend-graph` lesen den
   Zustandsverlauf, nicht die Langzeitstatistik.** Deshalb zeigten sie die
   Ausreißer nach der Bereinigung weiter. Drei Karten des Dashboards sind
