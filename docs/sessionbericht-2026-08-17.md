@@ -16,7 +16,7 @@ ausschließlich an `waage-eg` und sieht das Testgerät nicht.
 
 ## 1. Was entstanden ist
 
-Eine Datei, 243 Zeilen, davon 212 Kommentar und Leerzeilen:
+Eine Datei, 257 Zeilen, davon 227 Kommentar und Leerzeilen:
 
 ```
 waage-esp32-test.yaml    substitutions + package-Include + vier Overrides
@@ -53,11 +53,26 @@ Einträge mit derselben ID und damit einen Fehler, keinen Override.
 
 ### 2.1 Plattformblock
 
-`esp8266: !remove`, dann ein `esp32:`-Block mit `board: ${board}` und
-ausgeschriebenem `framework: type: esp-idf`. Die Vorgabe von ESPHome 2026.6.5
-für ESP32 ist ohnehin esp-idf (`_set_default_framework` in
-`components/esp32/__init__.py`) — ausgeschrieben, damit ein späterer Wechsel
-der Vorgabe dieses Gerät nicht unbemerkt auf eine andere Toolchain schiebt.
+`esp8266: !remove`, dann ein `esp32:`-Block mit ausgeschriebenem
+`board: esp32doit-devkit-v1` und ausgeschriebenem `framework: type: esp-idf`.
+Die Vorgabe von ESPHome 2026.6.5 für ESP32 ist ohnehin esp-idf
+(`_set_default_framework` in `components/esp32/__init__.py`) — ausgeschrieben,
+damit ein späterer Wechsel der Vorgabe dieses Gerät nicht unbemerkt auf eine
+andere Toolchain schiebt.
+
+**Das Board steht bewusst literal dort und nicht in den `substitutions`.** Der
+erste Anlauf hatte `board: ${board}` mit einer eigenen Substitution weiter oben
+in der Datei — und war damit praktisch unauffindbar: bei einer Board-Portierung
+sieht man im `esp32:`-Block nach, und dort stand nur eine Variable. Die
+Substitution trug auch nichts. In der Basis existiert `board:` nur, damit der
+dortige `esp8266:`-Block sie lesen kann, und genau der wird hier entfernt;
+konsumiert hätte sie also allein der `esp32:`-Block derselben Datei. Keine der
+übrigen Stock-Dateien setzt `board` überhaupt — sie erben alle `d1_mini`.
+
+Nebenwirkung, die beim Lesen der *aufgelösten* Konfiguration kurz stutzen
+lässt: im `substitutions:`-Echo steht weiterhin `board: d1_mini`, die Vorgabe
+aus der Basis. Sie hat nach dem `!remove` keinen Abnehmer mehr und ist
+folgenlos; maßgeblich ist `esp32: board:`.
 
 ### 2.2 `restore_from_flash` — es gibt keine Entsprechung, und es braucht keine
 

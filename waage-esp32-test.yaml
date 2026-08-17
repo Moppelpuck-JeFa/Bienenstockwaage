@@ -54,10 +54,22 @@ substitutions:
   ap_ssid: "Waage-ESP32 Fallback"
 
   # --- Board ---
-  # Die Basis setzt hier d1_mini; ueberschrieben wird der Wert unten im
-  # esp32:-Block verwendet. NodeMCU-32S-Boards sind mit diesem
-  # Board-Profil kompatibel (beide ESP32-WROOM-32, 4 MB Flash).
-  board: esp32doit-devkit-v1
+  # Hier steht bewusst KEIN board: - anders als man es nach den uebrigen
+  # Stock-Dateien erwarten wuerde. Das Board steht ausgeschrieben im
+  # esp32:-Block weiter unten.
+  #
+  # Grund: Die substitution board: existiert in der Basis nur, damit der
+  # dortige esp8266:-Block sie lesen kann. Genau dieser Block wird hier
+  # per !remove entfernt - die Substitution haette also keinen Abnehmer
+  # mehr ausser dem esp32:-Block in dieser Datei selbst. Ein Wert, der in
+  # derselben Datei gesetzt und gelesen wird, gehoert nicht durch eine
+  # Substitution: er waere dann nur noch schwerer zu finden, und zwar an
+  # der einen Stelle, an der man bei einer Board-Portierung zuerst
+  # nachsieht.
+  #
+  # Die Vorgabe d1_mini aus der Basis bleibt damit unbenutzt stehen. Das
+  # ist folgenlos - sie hat nach dem !remove niemanden mehr, der sie
+  # liest.
 
   # --- Pins (Anschlussplan ESP32 DOIT DevKit V1) ---
   #
@@ -145,7 +157,9 @@ packages:
 esp8266: !remove
 
 esp32:
-  board: ${board}
+  # NodeMCU-32S ist mit diesem Board-Profil kompatibel: beide sind
+  # ESP32-WROOM-32 mit 4 MB Flash.
+  board: esp32doit-devkit-v1
   framework:
     # Vorgabe von ESPHome 2026.6.5 fuer ESP32 ist ohnehin esp-idf; hier
     # ausgeschrieben, damit ein spaeterer Wechsel der Vorgabe dieses
