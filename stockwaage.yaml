@@ -1,5 +1,5 @@
 # =====================================================================
-# Testgeraet "Waage ESP32 Test" - Portierung auf ESP32 NodeMCU
+# Stock "Stockwaage" - ESP32 NodeMCU
 # =====================================================================
 # Reine BOARD-PORTIERUNG von waage-eg auf ein ESP32 DOIT DevKit V1
 # (NodeMCU-32S-kompatibel), Netzteilbetrieb. Kein Deep Sleep, kein
@@ -24,10 +24,26 @@
 # ---------------------------------------------------------------------
 # geraete_name/anzeige_name sind bewusst NEU und duerfen nicht auf
 # "waage-eg"/"Waage eG" gesetzt werden. Die Entities heissen dadurch
-# sensor.waage_esp32_test_gewicht usw. und liegen neben denen des
-# produktiven Geraets. Beide duerfen gleichzeitig laufen; die Helfer,
-# Automationen und das Dashboard in HA haengen weiter an waage-eg und
-# sehen dieses Testgeraet gar nicht.
+# sensor.stockwaage_gewicht usw. und liegen neben denen des produktiven
+# Geraets. Beide duerfen gleichzeitig laufen; die Helfer, Automationen
+# und das Dashboard von waage-eg haengen weiter an dessen Entities und
+# sehen dieses Geraet gar nicht.
+#
+# DER NAME IST BEWUSST OHNE "esp32" UND OHNE "test". Beides altert
+# schlecht: das Board wird irgendwann getauscht, und aus einem Testaufbau
+# wird ein produktiver. Ein spaeteres Umbenennen kostet dann die
+# HA-Historie, weil geraete_name+anzeige_name die entity_id bilden -
+# deshalb steht der Name JETZT fest, vor dem ersten Flash.
+#
+# IN HOME ASSISTANT HAENGT BEREITS ETWAS DARAN (17.08.2026 angelegt,
+# bevor das Geraet existierte - die Entities sind daher noch
+# "unavailable" und werden von selbst gruen, sobald geflasht und
+# eingebunden ist):
+#   - Dashboard "Stockwaage" (/bienen-stockwaage-esp32), drei Ansichten
+#   - sensor.stockwaage_tagesbilanz          (statistics, change, 24 h)
+#   - sensor.stockwaage_gewichtsanderung     (derivative, 6 h  -> kg/d)
+#   - sensor.stockwaage_gewichtsverlust_kurz (derivative, 20 min -> kg/h)
+# Wer geraete_name hier aendert, muss die vier Stellen mit aendern.
 #
 # ---------------------------------------------------------------------
 # Nach dem ersten Flash: KALIBRIEREN, beide Schritte
@@ -49,9 +65,9 @@
 
 substitutions:
   # --- Identitaet (bewusst NICHT waage-eg, siehe Kopf) ---
-  geraete_name: "waage-esp32-test"
-  anzeige_name: "Waage ESP32 Test"
-  ap_ssid: "Waage-ESP32 Fallback"
+  geraete_name: "stockwaage"
+  anzeige_name: "Stockwaage"
+  ap_ssid: "Stockwaage Fallback"
 
   # --- Board ---
   # Hier steht bewusst KEIN board: - anders als man es nach den uebrigen

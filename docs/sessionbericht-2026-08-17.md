@@ -1,16 +1,17 @@
 # Sessionbericht 17.08.2026
 
 Portierung der produktiven Konfiguration auf **ESP32 NodeMCU** (DOIT DevKit V1)
-als eigenständiges Testgerät. Reine Board-Portierung des Netzteilbetriebs —
-kein Deep Sleep, kein Solar-/Batteriebezug.
+als zweiter Stock **„Stockwaage"**, plus die zugehörige HA-Seite. Reine
+Board-Portierung des Netzteilbetriebs — kein Deep Sleep, kein
+Solar-/Batteriebezug.
 
 **Anlagenzustand unverändert:** `waage-eg` läuft weiter auf dem ESP8266,
 geflasht wurde nichts. `waage-eg.yaml` und `packages/waage-basis.yaml` sind
-**nicht angefasst** worden; die einzige neue Datei ist `waage-esp32-test.yaml`.
+**nicht angefasst** worden; die einzige neue Datei ist `stockwaage.yaml`.
 
-**Nicht Teil dieser Session:** Hardware-Aufbau, Flashen, Kalibrieren des
-ESP32-Geräts. Die HA-Seite (Helfer, Automationen, Dashboard) hängt weiter
-ausschließlich an `waage-eg` und sieht das Testgerät nicht.
+**Nicht Teil dieser Session:** Hardware-Aufbau, Flashen, Kalibrieren. Für
+`waage-eg` wurde in HA nichts geändert — die neue Seite steht vollständig
+daneben (Abschnitt 6).
 
 ---
 
@@ -19,7 +20,7 @@ ausschließlich an `waage-eg` und sieht das Testgerät nicht.
 Eine Datei, 257 Zeilen, davon 227 Kommentar und Leerzeilen:
 
 ```
-waage-esp32-test.yaml    substitutions + package-Include + vier Overrides
+stockwaage.yaml    substitutions + package-Include + vier Overrides
 ```
 
 Die gesamte Messlogik kommt **unverändert aus `packages/waage-basis.yaml`** —
@@ -174,7 +175,7 @@ Geprüft mit ESPHome **2026.6.5**, nach der Methode aus dem
 
 ```bash
 esphome config waage-eg.yaml         | sed 's/\x1b\[[0-9;]*m//g' > eg.txt
-esphome config waage-esp32-test.yaml | sed 's/\x1b\[[0-9;]*m//g' > esp32.txt
+esphome config stockwaage.yaml | sed 's/\x1b\[[0-9;]*m//g' > esp32.txt
 diff eg.txt esp32.txt
 ```
 
@@ -186,7 +187,7 @@ Gezielt gegengeprüft:
 
 | Prüfung | Ergebnis |
 |---|---|
-| Entity-Namen (`name:`-Felder) | **identisch**, einzige Abweichung ist der Gerätename `waage-eg` → `waage-esp32-test` |
+| Entity-Namen (`name:`-Felder) | **identisch**, einzige Abweichung ist der Gerätename `waage-eg` → `stockwaage` |
 | `globals:`-Block, komplett | **identisch** — 21 Globals, gleiche IDs, `restore_value` und `initial_value` |
 | `script:` + `interval:`, komplett | **identisch** — 260 Zeilen |
 | `tests/waage-temperatur-test.cpp` | 4092 Prüfungen, 0 Fehler |
@@ -211,7 +212,7 @@ gpio-Schema       analog: entfällt; drive_strength, ignore_strapping_warning ne
 
 ---
 
-## 5. Was am Testgerät noch zu tun ist
+## 5. Was am neuen Gerät noch zu tun ist
 
 Bewusst **nicht** vorweggenommen:
 
@@ -228,6 +229,79 @@ Bewusst **nicht** vorweggenommen:
   Koeffizient ist eine Eigenschaft der Mechanik, nicht des Controllers. Wird
   die Portierung an einem **zweiten, eigenen** Aufbau getestet, gehört dort
   `"0"` hin.
+
+---
+
+## 6. Der Name, und die HA-Seite dazu
+
+### Warum „Stockwaage" und nicht „waage-esp32-test"
+
+Der erste Entwurf hieß `waage-esp32-test`. Das ist genau der Fehler, vor dem
+der [Sessionbericht 04.08.](sessionbericht-2026-08-04.md) warnt: `geraete_name`
++ `anzeige_name` bilden die entity_id, und **beide Bestandteile altern
+schlecht** — das Board wird irgendwann getauscht, und aus einem Testaufbau wird
+ein produktiver. Umbenannt wird dann nicht mehr, weil es die HA-Historie
+kostet; man lebt mit dem falschen Namen.
+
+Also vor dem ersten Flash festgelegt: **`stockwaage` / „Stockwaage"**, Entities
+`sensor.stockwaage_*`. Solange nichts geflasht ist, kostet das drei Zeilen.
+
+Beim Suchen fiel nebenbei auf, dass im WLAN ein Host **`bienenwaage-esp32`**
+hängt (`device_tracker.bienenwaage_esp32`, Status `home`). Der ist **nicht**
+über ESPHome eingebunden — es gibt nur den Router-Tracker und einen
+Internetzugang-Schalter, keine Messwert-Entity. Ebenso steht ein altes
+`ESP32-Testboard` mit `sensor.esp32_testboard_hx711_value` in HA, komplett
+`unavailable`. Beides ist nicht dieses Gerät; wer später sucht, soll sich davon
+nicht in die Irre führen lassen.
+
+### Was in HA angelegt wurde
+
+Alles am 17.08.2026 angelegt, **bevor das Gerät existiert**. Die Entities stehen
+deshalb auf `unavailable` und werden von selbst grün, sobald geflasht und
+eingebunden ist. Das ist kein Fehler, sondern der Preis dafür, die Seite fertig
+zu haben, bevor die Hardware kommt.
+
+| Objekt | Typ | Parameter (identisch zu `waage-eg`) |
+|---|---|---|
+| `sensor.stockwaage_tagesbilanz` | statistics | `state_characteristic: change`, `max_age: 24 h`, `sampling_size: 2000`, `precision: 2` |
+| `sensor.stockwaage_gewichtsanderung` | derivative | `time_window: 6 h`, `unit_time: d`, `round: 2` |
+| `sensor.stockwaage_gewichtsverlust_kurz` | derivative | `time_window: 20 min`, `unit_time: h`, `round: 2` |
+| Dashboard „Stockwaage" | storage | `/bienen-stockwaage-esp32`, drei Ansichten wie das Original |
+
+**Ein Fallstrick, der die Entity-IDs bestimmt hätte:** Die Helfer von `waage-eg`
+heißen nur „Waage Gewichtsänderung" — das `waage_eg_`-Präfix in
+`sensor.waage_eg_waage_gewichtsanderung` kommt vom **Gerät der Quell-Entity**,
+das HA dem Helfer beim Anlegen zuordnet. Existiert die Quelle noch nicht, gibt
+es kein Gerät und damit kein Präfix. Ein Helfer namens „Gewichtsänderung" wäre
+hier also als `sensor.gewichtsanderung` gelandet — global, ohne jeden Bezug zum
+Stock. Deshalb sind die drei Helfer **voll ausgeschrieben** benannt.
+
+### Was am Dashboard bewusst anders ist
+
+Struktur und Karten entsprechen dem Original (Übersicht / Auswertung /
+Technik). Abweichungen, jede mit Grund:
+
+- **Texte, die Geschichte erzählen, sind neu geschrieben.** Das Original nennt
+  Daten dieser Anlage („Die Reihe beginnt am 11.08.2026", „Kurve beginnt am
+  12.08."). Für einen Stock ohne Messreihe wäre das schlicht falsch.
+- **Der Absatz „Temperaturdrift prüfen" war überholt** — er behauptet, es werde
+  „aktuell nicht kompensiert". Für `waage-eg` stimmt das seit dem 10.08. nicht
+  mehr, für diesen Stock von Anfang an nicht. Neu geschrieben als Anleitung zum
+  **Nachmessen**, samt dem Hinweis, gegen *Temperatur Mittel* zu fitten und
+  nicht gegen *Temperatur*.
+- **Drei Diagnose-Entities ergänzt**, die es an `waage-eg` gibt, die aber in
+  dessen Dashboard fehlen: *Temperaturkorrektur*, *Temperatur Mittel* und die
+  Number *Temperaturkoeffizient*. Ohne sie lässt sich eine aktive Kompensation
+  nicht beurteilen.
+- **Zwei ESP32-spezifische Hinweise** stehen dort, wo sie gebraucht werden: der
+  externe Pull-up an GPIO34 im Durchsicht-Abschnitt („wenn der Modus von selbst
+  angeht: dort zuerst nachsehen"), und der NVS-Unterschied beim
+  Kalibrierfaktor.
+- **Die Futterkontrolle fehlt.** Sie bräuchte vier weitere Helfer und zwei
+  Schwellwerte (Leergewicht der Beute, Mindestgewicht mit Futter), die für
+  diesen Stock **eigene Zahlen** sind — die 18/29 kg von `waage-eg` gelten für
+  eine andere Beute. Geraten wird hier nichts; an der Stelle steht stattdessen
+  ein Hinweis im Dashboard.
 
 ---
 
@@ -248,6 +322,18 @@ Bewusst **nicht** vorweggenommen:
 - **Hardware nicht aufgebaut**, insbesondere der externe 10-kΩ-Pull-up an
   GPIO34. Ohne ihn schwebt der Tastereingang und der Durchsichtmodus schaltet
   sich zufällig ein.
+- **Futterkontrolle für „Stockwaage" fehlt** — vier Helfer plus zwei
+  stockeigene Schwellwerte, siehe Abschnitt 6.
+- **Keine Automationen für „Stockwaage".** Alle vier bestehenden (Schwarm,
+  Futtervorrat, Messintervall nach Saison, Offline) hängen an
+  `waage-eg`-Entities. Die Kurven, auf die ein Schwarm-Alarm aufsetzen würde,
+  liegen jetzt vor; der Alarm selbst ist ein eigener Schritt. Beim Duplizieren
+  daran denken, dass `Bienen: Schwarm-Alarm` **drei** Sperren trägt
+  (Durchsicht, Neustart, Kalibrierung) — ohne sie löst er nach jeder Durchsicht
+  und jedem Flash fälschlich aus.
+- **Das Messintervall wird für diesen Stock nicht saisonal gesetzt.** Die
+  Automation `Bienen: Messintervall nach Saison` schreibt nur auf `waage-eg`.
+  Steht so auch im Dashboard-Text, damit es nicht als Defekt gelesen wird.
 - **Erste NVS-Erfahrung sammeln.** Die Aussage „ein neues Global kostet auf dem
   ESP32 die Kalibrierung nicht" ist aus dem Quelltext abgeleitet, nicht am
   Gerät belegt — derselbe Stand, in dem die ESP8266-Regel am 11.08. war, bevor

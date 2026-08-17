@@ -49,7 +49,7 @@ Kalibrierung. Details im
 | [10.08.](docs/sessionbericht-2026-08-10.md) | Temperaturkompensation eingebaut, Schwarm-Alarm gesperrt |
 | [11.08.](docs/sessionbericht-2026-08-11.md) | Rohwerte über das Messintervall gemittelt, Diagnose "Rohwert Streuung" und "Temperatur Mittel" |
 | [12.08.](docs/sessionbericht-2026-08-12.md) | Plausibilitätsfenster −1…150 kg, Zähler "Gewicht verworfen", Langzeitstatistik bereinigt und zeitbasiert geschnitten, Kalibrier-Sperre |
-| [17.08.](docs/sessionbericht-2026-08-17.md) | Portierung auf ESP32 NodeMCU als Testgerät (`waage-esp32-test.yaml`), NVS statt `restore_from_flash`, `!remove`/`!extend` statt Basis-Kopie |
+| [17.08.](docs/sessionbericht-2026-08-17.md) | Zweiter Stock „Stockwaage" auf ESP32 NodeMCU (`stockwaage.yaml`), NVS statt `restore_from_flash`, `!remove`/`!extend` statt Basis-Kopie, HA-Seite dazu (Dashboard + 3 Helfer) |
 
 **Wichtig:** Workflow-Sprache ist Deutsch — Code-Kommentare, YAML-Labels, Entity-Namen
 und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
@@ -442,7 +442,7 @@ Bienenstockwaage/
 ├── waage-eg.yaml                      # Stock 1: nur substitutions + package-Include
 ├── waage-stock2.yaml                  # Stock 2, dito
 ├── waage-stock3.yaml                  # Stock 3, dito
-├── waage-esp32-test.yaml              # Board-Portierung auf ESP32 NodeMCU.
+├── stockwaage.yaml              # Board-Portierung auf ESP32 NodeMCU.
 │                                       #   Nutzt dieselbe Basis, ueberschreibt
 │                                       #   per !remove/!extend nur den
 │                                       #   Plattformblock, WLAN-Powersave,
@@ -483,6 +483,11 @@ nach der Umstellung liefert dieselbe aufgelöste Konfiguration, bis auf den
 zusätzlichen `substitutions:`-Block.
 
 **Nicht im Repo (lebt nur in HA):** Helfer, Automationen, Dashboard `bienen-stockwaage`.
+Seit 17.08. zusätzlich für den zweiten Stock: Dashboard `bienen-stockwaage-esp32`
+(„Stockwaage") und drei abgeleitete Helfer `sensor.stockwaage_tagesbilanz` /
+`_gewichtsanderung` / `_gewichtsverlust_kurz`. Alle stehen auf `unavailable`,
+bis das Gerät geflasht und eingebunden ist. Automationen und Futterkontrolle
+gibt es dafür noch nicht — siehe Sessionbericht 17.08., Abschnitt 6.
 
 **Wo der eigentliche Code steht:** Diese Datei fasst nur Entscheidungen zusammen.
 Die vollständige Logik (Globals, HX711 samt Filterkette, Kalibrier-Buttons,
