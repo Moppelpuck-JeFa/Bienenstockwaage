@@ -1,0 +1,243 @@
+# =====================================================================
+# Testgeraet "Waage ESP32 Test" - Portierung auf ESP32 NodeMCU
+# =====================================================================
+# Reine BOARD-PORTIERUNG von waage-eg auf ein ESP32 DOIT DevKit V1
+# (NodeMCU-32S-kompatibel), Netzteilbetrieb. Kein Deep Sleep, kein
+# Solar-/Batteriebetrieb - dafuer gilt weiterhin
+# docs/deep-sleep-vorbereitung.md, und die dortigen Ueberlegungen zum
+# ESP8266-Weckpin GPIO16 sind auf dem ESP32 hinfaellig.
+#
+# Die gesamte Messlogik kommt UNVERAENDERT aus packages/waage-basis.yaml -
+# derselben Datei, aus der auch waage-eg geflasht wird. Es gibt bewusst
+# KEINE ESP32-Kopie der Basis: eine zweite Kopie von 1.500 Zeilen Logik
+# wuerde beim naechsten Feinschliff auseinanderlaufen, und zwar still.
+# Stattdessen werden hier genau die drei Stellen ueberschrieben, an denen
+# der ESP32 sich vom ESP8266 unterscheidet (siehe unten).
+#
+# waage-eg.yaml ist dabei NICHT angefasst worden, packages/waage-basis.yaml
+# ebenfalls nicht. Diese Datei kann also nichts am produktiven Geraet
+# aendern - der naechste Flash von waage-eg liefert Byte fuer Byte
+# dieselbe aufgeloeste Konfiguration wie vorher.
+#
+# ---------------------------------------------------------------------
+# ACHTUNG - eigene Entity-IDs
+# ---------------------------------------------------------------------
+# geraete_name/anzeige_name sind bewusst NEU und duerfen nicht auf
+# "waage-eg"/"Waage eG" gesetzt werden. Die Entities heissen dadurch
+# sensor.waage_esp32_test_gewicht usw. und liegen neben denen des
+# produktiven Geraets. Beide duerfen gleichzeitig laufen; die Helfer,
+# Automationen und das Dashboard in HA haengen weiter an waage-eg und
+# sehen dieses Testgeraet gar nicht.
+#
+# ---------------------------------------------------------------------
+# Nach dem ersten Flash: KALIBRIEREN, beide Schritte
+# ---------------------------------------------------------------------
+# Die start_calib_*-Werte unten sind - wie bei jedem neuen Geraet - reine
+# Platzhalter und ergeben rechnerisch 3.500 counts/kg. Das ist das
+# vereinbarte Alarmzeichen fuer "noch nicht kalibriert" und steht
+# absichtlich weit weg vom Erwartungsbereich.
+#
+# Erwartet werden nach der Kalibrierung -18.000 bis -21.000 counts/kg
+# (zuletzt an diesen Zellen gemessen: -20.840 bzw. -20.755,9). Der
+# Erwartungsbereich gilt hier unveraendert, weil Waegezellen, Verkabelung
+# und Mechanik dieselben sind - der Kalibrierfaktor haengt an der
+# Bruecke und am HX711, nicht am Mikrocontroller.
+#
+# Ebenfalls pruefen: "Kalibriert bei" darf nicht leer sein, sonst fehlt
+# der Bezugspunkt und die Temperaturkompensation schaltet sich stumm ab.
+# =====================================================================
+
+substitutions:
+  # --- Identitaet (bewusst NICHT waage-eg, siehe Kopf) ---
+  geraete_name: "waage-esp32-test"
+  anzeige_name: "Waage ESP32 Test"
+  ap_ssid: "Waage-ESP32 Fallback"
+
+  # --- Board ---
+  # Die Basis setzt hier d1_mini; ueberschrieben wird der Wert unten im
+  # esp32:-Block verwendet. NodeMCU-32S-Boards sind mit diesem
+  # Board-Profil kompatibel (beide ESP32-WROOM-32, 4 MB Flash).
+  board: esp32doit-devkit-v1
+
+  # --- Pins (Anschlussplan ESP32 DOIT DevKit V1) ---
+  #
+  # | Funktion       | ESP8266 (waage-eg) | ESP32 (hier) |
+  # |----------------|--------------------|--------------|
+  # | HX711 DOUT     | D6 (GPIO12)        | GPIO16       |
+  # | HX711 CLK      | D1 (GPIO5)         | GPIO17       |
+  # | DS18B20        | D5 (GPIO14)        | GPIO4        |
+  # | Durchsicht-Taster | D2 (GPIO4)      | GPIO34       |
+  # | Durchsicht-LED | D7 (GPIO13)        | GPIO18       |
+  #
+  # Externe Beschaltung unveraendert uebernommen: Pull-up 4,7 kOhm vom
+  # DS18B20-Datenpin gegen 3V3, Vorwiderstand 1 kOhm vor der LED.
+  # Versorgung ueber VIN (5 V) bzw. 3V3; der 3V3-Regler der DevKits
+  # liefert reichlich fuer HX711 samt Bruecke (~5,8 mA).
+  #
+  # Gemiedene Pins und der Grund dafuer:
+  #   GPIO0, 2, 5, 12, 15  Boot-Strapping, brauchen beim Start einen
+  #                        bestimmten Pegel (GPIO12 setzt sogar die
+  #                        Flash-Spannung - genau der Pin, auf dem beim
+  #                        ESP8266 DOUT lag)
+  #   GPIO6-11             fest am SPI-Flash, nicht nutzbar
+  #   GPIO1, 3             UART0, also Konsole und Flashen
+  #   GPIO35, 36, 39       ebenfalls input-only, als Reserve freigehalten
+  #
+  # GPIO16/17 sind auf ESP32-WROOM frei. Sollte spaeter ein
+  # WROVER-Modul zum Einsatz kommen: dort liegt daran das PSRAM, dann
+  # muessen DOUT/CLK umziehen.
+  pin_hx711_dout: GPIO16
+  pin_hx711_clk: GPIO17
+  pin_temperatur: GPIO4
+  # GPIO34 ist INPUT-ONLY und hat keinen internen Pull-up. Deshalb zwei
+  # Dinge: extern 10 kOhm gegen 3V3 verbauen (Taster weiter gegen GND),
+  # und den internen Pull-up der Basis unten abschalten - ohne das
+  # bricht schon "esphome config" ab. Das ist der einzige Punkt, an dem
+  # die Portierung mehr kostet als eine geaenderte Pin-Nummer.
+  pin_taster: GPIO34
+  pin_led: GPIO18
+
+  # --- Startwerte der Kalibrierung ---
+  # Unveraendert von waage-eg uebernommen, und zwar absichtlich als
+  # Platzhalter: 1750/0.5 ergibt 3.500 counts/kg und macht damit sofort
+  # sichtbar, dass dieses Geraet noch nie kalibriert wurde. Echte Werte
+  # hier einzutragen waere ein Fehler - sie saehen nach einer gueltigen
+  # Kalibrierung aus, ohne je gegen ein Gewicht geprueft worden zu sein.
+  start_calib_raw_zero: "0.0"
+  start_calib_raw_ref: "1750.0"
+  start_calib_kg_ref: "0.5"
+
+  # --- Startwerte der Einstell-Entities ---
+  # Ebenfalls unveraendert. Das Messintervall bleibt bei 6 h, damit diese
+  # Portierung sich vom Verhalten her nicht von waage-eg unterscheidet;
+  # zum Testen laesst es sich in HA jederzeit herunterstellen (es ist eine
+  # Number-Entity, kostet also keinen Flash).
+  start_referenzgewicht: "0.5"
+  start_messintervall: "360"        # min (= 6 h)
+  start_durchsicht_dauer: "60"      # min
+
+  # Temperaturkoeffizient: 32,5 g/K wie bei waage-eg.
+  #
+  # Sonst gilt fuer ein neues Geraet "mit 0 anfangen, bis der eigene
+  # Koeffizient gemessen ist". Hier nicht: der Koeffizient ist eine
+  # Eigenschaft der Waegezellen und der Mechanik, und die sind dieselben.
+  # Der Mikrocontroller geht in die Groesse nicht ein.
+  #
+  # Wird die Portierung dagegen an einem ZWEITEN, eigenen Aufbau
+  # getestet, gehoert hier "0" hin.
+  start_temp_koeffizient: "32.5"    # g/K
+
+packages:
+  basis: !include packages/waage-basis.yaml
+
+# =====================================================================
+# ESP32-spezifische Abweichungen von der Basis
+# =====================================================================
+# Genau vier Stellen. Alles andere - Globals, HX711 mit Filterkette,
+# Messfenster, Kalibrier- und Tara-Buttons, Plausibilitaetsfenster,
+# Kalibrier-Sperre, Durchsichtmodus, Taktgeber - kommt unveraendert aus
+# packages/waage-basis.yaml.
+
+# --- 1) Plattformblock tauschen ---
+# Die Basis bringt einen esp8266:-Block mit. Beide Plattformbloecke
+# gleichzeitig gehen nicht, und ein Package-Wert laesst sich nur
+# ueberschreiben, nicht loeschen - dafuer gibt es !remove.
+esp8266: !remove
+
+esp32:
+  board: ${board}
+  framework:
+    # Vorgabe von ESPHome 2026.6.5 fuer ESP32 ist ohnehin esp-idf; hier
+    # ausgeschrieben, damit ein spaeterer Wechsel der Vorgabe dieses
+    # Geraet nicht unbemerkt auf eine andere Toolchain schiebt.
+    type: esp-idf
+
+# --- 2) restore_from_flash hat auf dem ESP32 KEINE Entsprechung ---
+# und braucht auch keine. Das ist kein Weglassen aus Bequemlichkeit,
+# sondern ein echter Plattformunterschied - nachgesehen im Quelltext von
+# ESPHome 2026.6.5:
+#
+#   esp8266/preferences.cpp  make_preference(length, type, in_flash)
+#       Der Platz eines restore_value-Globals ergibt sich aus der
+#       REIHENFOLGE der Aufrufe (current_flash_offset += total_words).
+#       Der Namens-Hash geht nur in die CRC ein. Ein neu hinzugefuegtes
+#       Global mit restore_value: yes verschiebt deshalb alles
+#       Nachfolgende, die CRC schlaegt fehl, die Werte fallen auf
+#       initial_value zurueck. Genau das hat am 03.08. und am 10.08.2026
+#       die Kalibrierung gekostet.
+#       Ohne restore_from_flash: true landet ausserdem alles nur im
+#       RTC-RAM und ist bei Stromausfall weg.
+#
+#   esp32/preferences.cpp    make_preference(length, type)
+#       Jedes Global bekommt einen EIGENEN NVS-Eintrag, dessen Schluessel
+#       der Hash des Globals ist (1944399030 ^ name_hash, siehe
+#       globals_component.h) - nvs_set_blob/nvs_get_blob unter genau
+#       diesem Namen. Keine Offsets, keine Reihenfolge. NVS liegt im
+#       Flash, ein Stromausfall ist also unkritisch.
+#
+# Zwei Folgerungen fuer dieses Geraet:
+#
+#   a) Der Dauerbrenner "ein Flash mit einem neuen Global kostet die
+#      Kalibrierung" faellt hier strukturell weg. Ein neues Global
+#      belegt einen neuen NVS-Schluessel und laesst die bestehenden in
+#      Ruhe - unabhaengig davon, ob es restore_value: yes oder no hat,
+#      und unabhaengig davon, wo in der Datei es steht.
+#   b) Die Regel "nach jedem Flash den Kalibrierfaktor pruefen" bleibt
+#      trotzdem stehen. Sie kostet dreissig Sekunden, und sie faengt
+#      auch die Faelle, die mit den Preferences nichts zu tun haben
+#      (halbe Kalibrierung, verrutschte Zelle, geleertes NVS nach einem
+#      "Clean build"-Lauf).
+#
+# Was auf dem ESP32 dafuer NEU zu beachten ist: NVS wird durch
+# erase_flash / "Clean Build Files" mitgelöscht, und beim ESP8266 lag
+# der Preferences-Bereich ausserhalb dessen, was ein OTA anfasst.
+# Vor einem Erase also den Kalibrierfaktor notieren.
+
+# --- 3) WLAN-Stromsparmodus auf dem Wert des ESP8266 festhalten ---
+# Kein Wunsch, sondern eine Reparatur: die Vorgabe von power_save_mode ist
+# plattformabhaengig - auf dem ESP8266 NONE, auf dem ESP32 LIGHT. Ohne
+# diese Zeile haette die Portierung also nebenbei den Stromsparmodus
+# eingeschaltet, ohne dass es irgendwo in dieser Datei steht.
+#
+# Aufgefallen ist es nur im Diff der aufgeloesten Konfiguration - im YAML
+# ist davon nichts zu sehen. Genau dafuer ist der Diff da.
+#
+# NONE ist hier auch sachlich richtig: Die Waage steht am Rand der
+# Funkabdeckung (-74 bis -76 dBm an waage-eg), und Light Sleep laesst den
+# Empfaenger zwischen den Beacons schlafen - das kostet an einer ohnehin
+# knappen Verbindung Stabilitaet. Gespart wuerde dafuer Strom, den dieses
+# Geraet am Netzteil nicht sparen muss. Fuer einen spaeteren
+# Solar-/Batteriebetrieb ist das eine der Stellschrauben, aber das ist
+# ausdruecklich nicht Gegenstand dieser Portierung.
+wifi:
+  power_save_mode: NONE
+
+# --- 4) Durchsicht-Taster: interner Pull-up ist auf GPIO34 nicht moeglich ---
+# Die Basis konfiguriert den Taster mit "pullup: true" - auf dem ESP8266
+# richtig, auf GPIO34 des ESP32 ein Validierungsfehler: GPIO34-39 sind
+# input-only und haben ueberhaupt keine internen Pull-Widerstaende.
+#
+# !extend greift den Eintrag der Basis ueber seine ID heraus und
+# ueberschreibt gezielt dieses eine Feld. Ohne !extend waere es ein
+# ZWEITER binary_sensor mit derselben ID (Listen aus Packages werden
+# aneinandergehaengt, nicht ueber die ID zusammengefuehrt) - und damit
+# ein Fehler.
+#
+# Pin-Nummer, "inverted" und die Entprellung bleiben aus der Basis:
+# der externe 10-kOhm-Pull-up gegen 3V3 macht die Logik identisch zum
+# internen des ESP8266 (Ruhe = high, gedrueckt = low), "inverted"
+# stimmt also weiterhin.
+binary_sensor:
+  - id: !extend durchsicht_taster
+    pin:
+      mode:
+        pullup: false
+
+# Eigener API-Key / OTA-Passwort nur fuer dieses Geraet waere hier
+# moeglich (Werte aus dieser Datei haben Vorrang vor denen aus dem
+# Package). Fuer ein Testgeraet bewusst nicht gemacht - es teilt sich
+# den Key mit den uebrigen Stoecken:
+#
+#   api:
+#     encryption:
+#       key: !secret api_key_esp32_test

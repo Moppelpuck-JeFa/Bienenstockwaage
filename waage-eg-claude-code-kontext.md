@@ -49,6 +49,7 @@ Kalibrierung. Details im
 | [10.08.](docs/sessionbericht-2026-08-10.md) | Temperaturkompensation eingebaut, Schwarm-Alarm gesperrt |
 | [11.08.](docs/sessionbericht-2026-08-11.md) | Rohwerte über das Messintervall gemittelt, Diagnose "Rohwert Streuung" und "Temperatur Mittel" |
 | [12.08.](docs/sessionbericht-2026-08-12.md) | Plausibilitätsfenster −1…150 kg, Zähler "Gewicht verworfen", Langzeitstatistik bereinigt und zeitbasiert geschnitten, Kalibrier-Sperre |
+| [17.08.](docs/sessionbericht-2026-08-17.md) | Portierung auf ESP32 NodeMCU als Testgerät (`waage-esp32-test.yaml`), NVS statt `restore_from_flash`, `!remove`/`!extend` statt Basis-Kopie |
 
 **Wichtig:** Workflow-Sprache ist Deutsch — Code-Kommentare, YAML-Labels, Entity-Namen
 und Doku sind alle auf Deutsch gehalten. Bitte das beibehalten.
@@ -441,6 +442,12 @@ Bienenstockwaage/
 ├── waage-eg.yaml                      # Stock 1: nur substitutions + package-Include
 ├── waage-stock2.yaml                  # Stock 2, dito
 ├── waage-stock3.yaml                  # Stock 3, dito
+├── waage-esp32-test.yaml              # Board-Portierung auf ESP32 NodeMCU.
+│                                       #   Nutzt dieselbe Basis, ueberschreibt
+│                                       #   per !remove/!extend nur den
+│                                       #   Plattformblock, WLAN-Powersave,
+│                                       #   die Pins und den Taster-Pullup.
+│                                       #   Hardware noch nicht aufgebaut.
 ├── secrets.yaml.example               # Vorlage: wifi_ssid, wifi_password,
 │                                       #   ap_fallback_password, api_encryption_key, ota_password
 ├── waage-eg-notes.md                  # Entscheidungen, Begründungen, HA-Seite
