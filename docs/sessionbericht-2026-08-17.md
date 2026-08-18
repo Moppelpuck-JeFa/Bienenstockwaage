@@ -1,17 +1,17 @@
 # Sessionbericht 17.08.2026
 
 Portierung der produktiven Konfiguration auf **ESP32 NodeMCU** (DOIT DevKit V1)
-als zweiter Stock **„Stockwaage"**, plus die zugehörige HA-Seite. Reine
-Board-Portierung des Netzteilbetriebs — kein Deep Sleep, kein
-Solar-/Batteriebezug.
+als zweiter Stock **„Stockwaage"**, die zugehörige HA-Seite, und im zweiten
+Teil der Session Deep Sleep mit BS250-Lastschalter (Abschnitt 7).
 
 **Anlagenzustand unverändert:** `waage-eg` läuft weiter auf dem ESP8266,
 geflasht wurde nichts. `waage-eg.yaml` und `packages/waage-basis.yaml` sind
 **nicht angefasst** worden; die einzige neue Datei ist `stockwaage.yaml`.
 
-**Nicht Teil dieser Session:** Hardware-Aufbau, Flashen, Kalibrieren. Für
-`waage-eg` wurde in HA nichts geändert — die neue Seite steht vollständig
-daneben (Abschnitt 6).
+**Nicht Teil dieser Session:** Kalibrieren, Aufbau der MOSFET-Beschaltung,
+Ruhestrommessung. Für `waage-eg` wurde weder am YAML noch in HA etwas geändert —
+die neue Seite steht vollständig daneben (Abschnitt 6), und Deep Sleep liegt
+ausschließlich in `stockwaage.yaml` (Abschnitt 7).
 
 ---
 
@@ -305,6 +305,71 @@ Technik). Abweichungen, jede mit Grund:
 
 ---
 
+## 7. Deep Sleep mit BS250-Lastschalter
+
+Eingebaut in `stockwaage.yaml`, ausdrücklich **nicht** in der Basis — dort
+würde es beim nächsten Flash `waage-eg` schlafen legen. Nachgewiesen: null
+`deep_sleep`-Blöcke in der aufgelösten Konfiguration von `waage-eg`,
+`waage-stock2`, `waage-stock3`; genau einer in `stockwaage`.
+
+**Die Vorarbeit in [`deep-sleep-vorbereitung.md`](deep-sleep-vorbereitung.md)
+ist für den ESP8266 geschrieben und stimmt auf dem ESP32 in vier Punkten nicht
+mehr** — die Brücke GPIO16↔RST entfällt, GPIO-Wecken ist möglich, die
+71-Minuten-Grenze gilt nicht, und der dort empfohlene SCK-Pull-up wäre hier
+sogar schädlich (er säße an dauerhaften 3V3 und speiste über die Schutzdiode in
+den abgeschalteten HX711). Das ist jetzt als Abschnitt 9 dort dokumentiert.
+
+**Der Hardwareschalter ist kein Eigenbau.** ESPHome hat den Mechanismus
+eingebaut; nachgesehen in `deep_sleep_esp32.cpp`:
+
+```cpp
+if (wakeup_pin_mode_ == WAKEUP_PIN_MODE_KEEP_AWAKE &&
+    wakeup_pin_ != nullptr && wakeup_pin_->digital_read()) {
+  ESP_LOGW(TAG, "Waiting for wakeup pin state change");
+  return false;   // -> es wird nicht geschlafen
+}
+```
+
+Geprüft bei **jedem** Schlafversuch, nicht nur beim Booten. Rastender Schalter
+an GPIO33 (weckfähig *und* mit internem Pull-up, anders als GPIO34–39).
+
+**Der Softwareschalter spiegelt einen HA-Helfer statt eines Geräte-Switches.**
+Ein Template-Switch würde seinen Zustand über NVS behalten, aber ein Umlegen
+*während des Schlafs* ginge verloren — und genau das ist der Hauptfall („bleib
+wach, ich will ein OTA fahren"). Der `homeassistant`-Sensor holt beim Verbinden
+den aktuellen Stand, Umlegen im Schlaf wirkt beim nächsten Aufwachen. Angelegt:
+`input_boolean.stockwaage_wachhalten`.
+
+**Zwei Stolperstellen, die die Validierung gefunden hat:**
+
+- **`Duplicate key "wifi"`** — genau die Falle, vor der Abschnitt 4 des
+  Vorbereitungsdokuments bei `binary_sensor` warnt. Der neue `fast_connect`-Teil
+  musste in den *bestehenden* `wifi:`-Block der Stock-Datei.
+- **`Pin 33 is used in multiple places`, Exit-Code 2** — kein Hinweis, ein
+  harter Fehler. Derselbe Pin als `binary_sensor` (Anzeige) *und* als
+  `wakeup_pin` verlangt `allow_other_uses: true`, und zwar an **beiden**
+  Stellen; nur an einer meldet ESPHome „incorrectly sets allow_other_uses".
+
+**Am Messkonzept geändert:** Der HX711 wird im Weckfenster mit **100 ms statt
+1 s** abgetastet — die Filterkette ist damit nach ~6 s statt ~60 s voll, bei
+identischer Glättung. Veröffentlicht wird explizit in `on_boot`, weil der
+60-s-Taktgeber der Basis erst nach dem Ende des Weckfensters feuern würde.
+`deep_sleep.enter` wird bewusst nicht benutzt: `begin_sleep(manual=true)`
+überspringt die `prevent_`-Prüfung und könnte am Wachhalten vorbeischlafen —
+über `run_duration` greifen `prevent` und `KEEP_AWAKE` beide.
+
+**Der Preis:** Das Messfenster schrumpft auf ~25 Werte. Der Genauigkeitsgewinn
+vom 11.08. (4.300 Werte, 2,2 g → 0,1 g) ist im Deep-Sleep-Betrieb nicht zu
+haben. Gegenüber 0,1 kg Auflösung unkritisch, aber beim Vergleich der beiden
+Geräte zu wissen.
+
+**Nicht belegt und vor dem Batteriebetrieb zu messen:** der Spannungsabfall über
+den BS250. Er ist **kein Logic-Level-Typ** — Rds(on) ist bei −10 V spezifiziert,
+die Schwellspannung streut bis −3,5 V, und am 3,3-V-Rail stehen nur −3,3 V zur
+Verfügung. Details und Gegenprobe in Abschnitt 9.2 des Vorbereitungsdokuments.
+
+---
+
 ## Offene Punkte
 
 **Aus dieser Session neu:**
@@ -331,6 +396,14 @@ Technik). Abweichungen, jede mit Grund:
   daran denken, dass `Bienen: Schwarm-Alarm` **drei** Sperren trägt
   (Durchsicht, Neustart, Kalibrierung) — ohne sie löst er nach jeder Durchsicht
   und jedem Flash fälschlich aus.
+- **Ruhestrom und BS250-Spannungsabfall messen** — die zwei Zahlen, an denen
+  die ganze Deep-Sleep-Rechnung hängt (Abschnitt 9.6 des
+  Vorbereitungsdokuments). Ohne sie ist „~200 Tage" eine Hoffnung, keine Aussage.
+- **`einschwingzeit` (12 s) ist geschätzt**, mit Reserve. Jede am Gerät
+  eingesparte Sekunde geht direkt in die Laufzeit.
+- **Durchsicht-Taster im Deep-Sleep-Betrieb** — GPIO34 wäre weckfähig, aber
+  ext0 ist vom Wachhalten-Schalter belegt. Bis das über `ext1` gelöst ist, gilt
+  die Empfehlung: rastender Schalter statt Taster.
 - **Das Messintervall wird für diesen Stock nicht saisonal gesetzt.** Die
   Automation `Bienen: Messintervall nach Saison` schreibt nur auf `waage-eg`.
   Steht so auch im Dashboard-Text, damit es nicht als Defekt gelesen wird.

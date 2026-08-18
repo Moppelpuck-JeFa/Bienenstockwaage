@@ -125,6 +125,43 @@ substitutions:
   pin_taster: GPIO34
   pin_led: GPIO18
 
+  # --- Deep Sleep (BS250-Lastschalter) ---
+  # Gate des BS250. Ein P-Kanal-MOSFET schaltet HIGH-SIDE: Source an 3V3,
+  # Drain an VCC des HX711-Moduls, Gate hierher. Gate LOW = durchgeschaltet,
+  # deshalb "inverted: true" am switch weiter unten.
+  #
+  # ZWINGEND DAZU: 100 kOhm von Gate nach 3V3 (also Gate->Source).
+  # Im Deep Sleep sind die GPIOs hochohmig - ohne diesen Widerstand schwebt
+  # das Gate und der MOSFET steht undefiniert, im schlimmsten Fall halb
+  # leitend. Der Pull-up zieht das Gate dann auf Source-Potential und
+  # sperrt sicher. Das ist der Ausschalt-Pfad im Schlaf: es gibt keine
+  # Aktion, die das erledigt, das macht dieser Widerstand.
+  # 220 Ohm in Reihe ins Gate schaden nicht (begrenzt den Umladestrom).
+  pin_mosfet_hx711: GPIO25
+
+  # Rastender Schalter (Kipp-/Schiebeschalter, KEIN Taster) gegen GND.
+  # GPIO33 ist weckfaehig UND hat einen internen Pull-up - anders als
+  # GPIO34-39, wo einer extern noetig waere. Geschlossen = LOW = wach.
+  pin_wachhalten: GPIO33
+
+  # Schlafdauer = Messintervall. Der ESP32 hat hier NICHT das 71-Minuten-
+  # Limit des ESP8266 (dort steckt die Zeit in 32 Bit Mikrosekunden);
+  # der ESP32 rechnet in 64 Bit, Stunden sind also problemlos.
+  schlafdauer: "60min"
+
+  # Wachzeit pro Aufwachen. Muss decken: WLAN-Verbindung (~5-10 s),
+  # Einschwingen unten, Veroeffentlichen, etwas Luft. Jede Sekunde hier
+  # geht direkt in die Tagesbilanz - das ist die teuerste Zahl der Datei.
+  wachzeit: "35s"
+
+  # Wartezeit nach dem Einschalten des HX711, bevor gemessen wird.
+  # Deckt zweierlei: der HX711 braucht nach dem Power-Up ein paar hundert
+  # Millisekunden bis zur ersten gueltigen Wandlung, und die Filterkette
+  # (Median 5 -> gleitendes Mittel 12) muss volllaufen. Mit dem schnelleren
+  # Abtasttakt unten sind das rund 6 s; 12 s sind bewusst Reserve.
+  # AM GERAET NACHMESSEN - siehe docs/deep-sleep-vorbereitung.md, Punkt 8.2.
+  einschwingzeit: "12s"
+
   # --- Startwerte der Kalibrierung ---
   # Unveraendert von waage-eg uebernommen, und zwar absichtlich als
   # Platzhalter: 1750/0.5 ergibt 3.500 counts/kg und macht damit sofort
@@ -241,6 +278,19 @@ esp32:
 # ausdruecklich nicht Gegenstand dieser Portierung.
 wifi:
   power_save_mode: NONE
+  # Spart im Weckfenster den WLAN-Scan - der groesste Einzelposten beim
+  # Verbindungsaufbau und damit bares Guthaben in der Tagesbilanz.
+  # Setzt voraus, dass sich Kanal und BSSID nicht staendig aendern.
+  fast_connect: true
+  # Noch mehr braechte eine feste IP (spart DHCP). Bewusst NICHT gesetzt:
+  # das Geraet haengt auf 192.168.1.171 per DHCP, und eine falsch geratene
+  # Netzmaske oder ein falsches Gateway macht es unerreichbar - im
+  # Deep-Sleep-Betrieb heisst das USB-Kabel. Wenn gewuenscht:
+  #
+  #   manual_ip:
+  #     static_ip: 192.168.1.171
+  #     gateway: 192.168.1.1
+  #     subnet: 255.255.255.0
 
 # --- 4) Durchsicht-Taster: interner Pull-up ist auf GPIO34 nicht moeglich ---
 # Die Basis konfiguriert den Taster mit "pullup: true" - auf dem ESP8266
@@ -263,6 +313,44 @@ binary_sensor:
       mode:
         pullup: false
 
+  # --- Softwareschalter: Spiegel eines HA-Helfers ---
+  # BEWUSST NICHT ein template-switch auf dem Geraet: der wuerde seinen
+  # Zustand zwar ueber NVS behalten, aber ein Umlegen WAEHREND DES SCHLAFS
+  # ginge verloren - das Geraet ist dann nicht erreichbar. Genau das ist
+  # aber der Hauptfall ("ich will gleich ein OTA fahren, bleib wach").
+  #
+  # Ein homeassistant-binary_sensor holt sich beim Verbinden den AKTUELLEN
+  # Stand des Helfers. Umlegen im Schlaf wirkt damit beim naechsten
+  # Aufwachen - man legt den Schalter um und wartet eine Schlafphase ab.
+  - platform: homeassistant
+    id: wachhalten_ha
+    entity_id: input_boolean.stockwaage_wachhalten
+
+  # --- Hardwareschalter, nur zur Anzeige ---
+  # Das Wachhalten selbst macht NICHT dieser binary_sensor, sondern
+  # wakeup_pin_mode: KEEP_AWAKE im deep_sleep-Block. Hier steht er nur,
+  # damit in HA sichtbar ist, warum das Geraet wach ist.
+  - platform: gpio
+    id: wachhalten_schalter
+    name: "Wachhalten (Schalter)"
+    entity_category: diagnostic
+    icon: "mdi:sleep-off"
+    pin:
+      number: ${pin_wachhalten}
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+      # Derselbe Pin dient unten als Weckpin. ESPHome verweigert eine
+      # Doppelbelegung sonst hart (Exit 2, "Pin 33 is used in multiple
+      # places") - allow_other_uses ist die dafuer vorgesehene Freigabe
+      # und MUSS an BEIDEN Stellen stehen, sonst meldet die Validierung
+      # "incorrectly sets allow_other_uses: true".
+      allow_other_uses: true
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 50ms
+
 # Eigener API-Key / OTA-Passwort nur fuer dieses Geraet waere hier
 # moeglich (Werte aus dieser Datei haben Vorrang vor denen aus dem
 # Package). Fuer ein Testgeraet bewusst nicht gemacht - es teilt sich
@@ -271,3 +359,129 @@ binary_sensor:
 #   api:
 #     encryption:
 #       key: !secret api_key_esp32_test
+
+
+# =====================================================================
+# Deep Sleep
+# =====================================================================
+# NUR IN DIESER DATEI, NICHT IN packages/waage-basis.yaml. Die Basis wird
+# mit waage-eg geteilt; ein deep_sleep: dort wuerde beim naechsten Flash
+# das produktive ESP8266-Geraet schlafen legen.
+#
+# Was der ESP32 gegenueber der Vorarbeit in
+# docs/deep-sleep-vorbereitung.md aendert (die ist fuer den ESP8266
+# geschrieben):
+#
+#   - Die Bruecke GPIO16 <-> RST entfaellt ersatzlos. Der ESP32 weckt
+#     ueber seinen RTC-Timer intern; GPIO16 ist hier ohnehin DOUT.
+#   - Aufwachen per GPIO ist moeglich (ext0/ext1) - beim ESP8266 ging
+#     ausschliesslich der Timer. Genau davon lebt der Hardwareschalter.
+#   - Die 71-Minuten-Grenze der Schlafdauer gilt nicht (64 statt 32 Bit).
+#   - Der Pull-up von SCK nach 3V3 aus Abschnitt 2 wird NICHT gebraucht
+#     und waere hier sogar schaedlich: er haengt an DAUERHAFTEN 3V3 und
+#     wuerde ueber die Schutzdiode am SCK-Eingang Strom in den
+#     abgeschalteten HX711 speisen. Der MOSFET nimmt ihm die Aufgabe ab.
+deep_sleep:
+  id: tiefschlaf
+  sleep_duration: ${schlafdauer}
+  run_duration: ${wachzeit}
+
+  # --- Hardwareschalter ---
+  # KEEP_AWAKE ist der eingebaute Mechanismus dafuer, nachgesehen in
+  # components/deep_sleep/deep_sleep_esp32.cpp:
+  #
+  #   if (wakeup_pin_mode_ == WAKEUP_PIN_MODE_KEEP_AWAKE &&
+  #       wakeup_pin_ != nullptr && wakeup_pin_->digital_read()) {
+  #     ESP_LOGW(TAG, "Waiting for wakeup pin state change");
+  #     return false;   // -> es wird nicht geschlafen
+  #   }
+  #
+  # digital_read() beruecksichtigt "inverted", geschlossener Schalter
+  # (= LOW) heisst also "wach bleiben". Geprueft wird bei JEDEM
+  # Schlafversuch, nicht nur beim Booten: Schalter umlegen wirkt sofort,
+  # in beide Richtungen. Und weil derselbe Pin Weckpin ist, holt ein
+  # Umlegen waehrend des Schlafs das Geraet sofort hoch.
+  wakeup_pin:
+    number: ${pin_wachhalten}
+    mode:
+      input: true
+      pullup: true
+    inverted: true
+    allow_other_uses: true      # Gegenstueck zum binary_sensor oben
+  wakeup_pin_mode: KEEP_AWAKE
+
+# --- Lastschalter fuer den HX711 (BS250) ---
+# Der eigentliche Zweck der Uebung. Laut docs/deep-sleep-vorbereitung.md
+# ziehen HX711 und Waegezellenbruecke zusammen ~5,8 mA DAUERHAFT - der
+# schlafende ESP32 liegt bei ~0,01 mA. Ohne diesen Schalter bringt Deep
+# Sleep also fast nichts (Variante C der Tabelle dort: ~17 Tage), mit ihm
+# wird daraus Variante D (~200 Tage).
+#
+# Bewusst ein switch und kein output: restore_mode: ALWAYS_ON schaltet die
+# Versorgung schon beim Setup ein, ohne dass es dafuer eine on_boot-Aktion
+# und damit eine Reihenfolgefrage gegenueber dem HX711-Setup gibt.
+#
+# In HA sichtbar, weil man ihn fuer die Ruhestrommessung aus Punkt 8.1 des
+# Vorbereitungsdokuments von Hand ausschalten koennen will. ACHTUNG: Wer
+# ihn ausschaltet, legt die Waage still - der Rohwert bleibt dann leer.
+switch:
+  - platform: gpio
+    id: hx711_versorgung
+    name: "HX711-Versorgung"
+    entity_category: diagnostic
+    icon: "mdi:power-plug"
+    pin: ${pin_mosfet_hx711}
+    # P-Kanal: Gate LOW = leitend. "inverted" dreht das so, dass
+    # "an" in HA auch "HX711 hat Strom" heisst.
+    inverted: true
+    restore_mode: ALWAYS_ON
+
+# --- Der HX711 muss im Weckfenster schneller einschwingen ---
+# Die Basis taktet ihn mit 1 s. Median(5) + gleitendes Mittel(12) brauchen
+# damit ~60 s, bis hinten der erste Wert herauskommt - laenger als das
+# ganze Weckfenster. Statt die Filterkette zu kuerzen (die haengt an der
+# Mechanik, nicht am Wandler) wird hier schlicht schneller abgetastet:
+# bei 100 ms liefert der Median alle 0,5 s, die Kette ist nach gut 6 s
+# voll. Dieselbe Glaettung, ein Zehntel der Zeit.
+#
+# 10 Werte/s ist zugleich die Wandlungsrate des HX711 bei Gain 128 - ein
+# schnelleres Intervall braeuchte den 80-SPS-Modus und andere Hardware.
+sensor:
+  - id: !extend hx711_raw_counts
+    update_interval: 100ms
+
+# --- Kein Webserver im Batteriebetrieb ---
+# Kostet RAM und im Weckfenster Rechenzeit, und die Weboberflaeche ist bei
+# 35 s Wachzeit ohnehin nicht bedienbar. Wer sie zum Debuggen braucht,
+# legt den Wachhalten-Schalter um und kommentiert diese Zeile aus.
+web_server: !remove
+
+esphome:
+  on_boot:
+    # LATE: WLAN und API sind zu diesem Zeitpunkt am Starten.
+    - priority: -100
+      then:
+        # Erst auf HA warten - ohne API-Verbindung ist der Softwareschalter
+        # nicht lesbar. Der timeout ist das Sicherheitsnetz: ohne ihn haenge
+        # das Geraet bei WLAN-Ausfall bis run_duration und schliefe nie mit
+        # gefuelltem Messfenster ein.
+        - wait_until:
+            condition: api.connected
+            timeout: 20s
+        - if:
+            condition:
+              binary_sensor.is_on: wachhalten_ha
+            then:
+              - deep_sleep.prevent: tiefschlaf
+              - logger.log: "Wachhalten ueber HA aktiv - Deep Sleep ausgesetzt"
+        # Einschwingen lassen, dann GENAU EINMAL veroeffentlichen.
+        # Bewusst nicht dem 60-s-Taktgeber der Basis ueberlassen: der feuert
+        # erst nach dem Ende des Weckfensters. Reihenfolge wie dort -
+        # erst das Messfenster abschliessen (setzt die mittel_*-Globals),
+        # dann senden.
+        - delay: ${einschwingzeit}
+        - script.execute: messfenster_abschliessen
+        - script.wait: messfenster_abschliessen
+        - script.execute: messwerte_veroeffentlichen
+        - logger.log: "Messung im Weckfenster abgeschlossen"
+

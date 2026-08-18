@@ -1,5 +1,10 @@
 # Deep Sleep vorbereiten
 
+> **Dieses Dokument beschreibt den ESP8266 (`waage-eg`).** Für den zweiten
+> Stock `stockwaage` auf ESP32 gilt zusätzlich **Abschnitt 9** — dort fallen
+> mehrere der Blocker unten ersatzlos weg, und andere kommen hinzu. Wer am
+> ESP32 arbeitet, liest Abschnitt 9 zuerst.
+
 Deep Sleep ist aktuell **blockiert**, und zwar aus einem Grund, der sich beim
 nächsten Öffnen der Hardware in fünf Minuten beseitigen lässt. Dieses Dokument
 hält fest, was dafür zu tun ist — und was danach immer noch im Weg steht.
@@ -359,3 +364,150 @@ Weckfenster neu, bevor es überhaupt schlafen kann.
 4. **Ist Deep Sleep überhaupt der richtige Weg?** Bei 4,3 mA allein für die
    Brücke ist ein kleines Solarpanel mit LiFePO4-Zelle womöglich die einfachere
    Antwort als das Jagen nach Mikroampere.
+
+---
+
+## 9. Umsetzung auf dem ESP32 (`stockwaage`, 17.08.2026)
+
+Eingebaut in `stockwaage.yaml`, **nicht** in `packages/waage-basis.yaml` — die
+Basis wird mit `waage-eg` geteilt, ein `deep_sleep:` dort würde beim nächsten
+Flash das produktive ESP8266-Gerät schlafen legen. Nachgewiesen: `deep_sleep`
+taucht in der aufgelösten Konfiguration von `waage-eg`, `waage-stock2` und
+`waage-stock3` **null**mal auf, in `stockwaage` genau einmal.
+
+### 9.1 Was der ESP32 gegenüber Abschnitt 1–5 ändert
+
+| Aus diesem Dokument | Auf dem ESP32 |
+|---|---|
+| Brücke GPIO16 ↔ RST zwingend (Abschnitt 1) | **entfällt ersatzlos** — der RTC-Timer weckt chipintern |
+| Aufwachen **nur** über den Timer (Abschnitt 5) | **GPIO-Wecken möglich** (ext0/ext1) — davon lebt der Hardwareschalter |
+| Schlafdauer max. ~71 min (32-Bit-µs) | **kein Limit in der Praxis** (64 Bit) |
+| Pull-up 10 kΩ von SCK nach 3V3 (Abschnitt 2) | **weglassen** — siehe 9.3 |
+| Momenttaster im Schlaf verloren | gilt weiter, aber lösbar (siehe 9.6) |
+
+Weckfähige Pins des klassischen ESP32, aus
+`components/deep_sleep/__init__.py` (2026.7.4): **0, 2, 4, 12, 13, 14, 15, 25,
+26, 27, 32–39**. GPIO16/17 (HX711) und GPIO18 (LED) sind **nicht** dabei.
+
+### 9.2 Der BS250 als Lastschalter
+
+P-Kanal-MOSFET als **High-Side**-Schalter: Source an 3V3, Drain an VCC des
+HX711-Moduls, Gate an **GPIO25**. Gate LOW = leitend, deshalb `inverted: true`
+am Schalter.
+
+**Zwingend: 100 kΩ vom Gate nach 3V3** (Gate→Source). Im Deep Sleep sind die
+GPIOs hochohmig; ohne diesen Widerstand schwebt das Gate und der MOSFET steht
+undefiniert, im schlimmsten Fall halb leitend. Der Pull-up ist der
+Ausschalt-Pfad im Schlaf — es gibt keine Aktion, die das erledigt, und es
+braucht auch keine. 220 Ω in Reihe ins Gate begrenzen den Umladestrom.
+
+> **Vorbehalt, vor dem Batteriebetrieb zu messen:** Der BS250 ist **kein
+> Logic-Level-Typ.** Sein Rds(on) ist bei **Vgs = −10 V** spezifiziert, die
+> Schwellspannung liegt je nach Exemplar zwischen etwa −1 V und −3,5 V. Am
+> 3,3-V-Rail stehen aber nur −3,3 V zur Verfügung — ein Exemplar am oberen Ende
+> der Streuung leitet damit kaum. Bei den ~6 mA Laststrom fällt das lange nicht
+> auf, kann aber die Versorgungsspannung des HX711 drücken und damit die
+> Messung verstimmen.
+>
+> **Gegenprobe mit dem Multimeter:** Spannung zwischen Source und Drain im
+> eingeschalteten Zustand messen. Mehr als ~50 mV heißt, der MOSFET leitet
+> schlecht. Dann entweder ein Logic-Level-Typ (IRLML6402, DMG3415, AO3401) oder
+> das Gate über eine kleine NPN-Stufe aus 5 V ansteuern.
+
+### 9.3 Warum der SCK-Pull-up jetzt schädlich wäre
+
+Abschnitt 2 empfiehlt einen Pull-up von SCK nach 3V3, damit der HX711 im Schlaf
+selbst in den Power-Down geht. Mit dem MOSFET ist das nicht nur überflüssig,
+sondern **falsch**: Der Widerstand hinge an *dauerhaften* 3V3 und würde über die
+Schutzdiode am SCK-Eingang Strom in den abgeschalteten HX711 speisen — genau die
+Versorgung, die der MOSFET gerade abwirft. Wer beide Wege kombiniert, muss den
+Pull-up an die **geschaltete** Seite legen.
+
+### 9.4 Die beiden Schalter
+
+**Hardware — rastender Schalter an GPIO33 gegen GND.** GPIO33 ist weckfähig
+*und* hat einen internen Pull-up (anders als GPIO34–39, wo einer extern nötig
+wäre). Umgesetzt über `wakeup_pin_mode: KEEP_AWAKE`, also nicht selbst gebaut.
+Der Mechanismus steht in `deep_sleep_esp32.cpp`:
+
+```cpp
+if (wakeup_pin_mode_ == WAKEUP_PIN_MODE_KEEP_AWAKE &&
+    wakeup_pin_ != nullptr && wakeup_pin_->digital_read()) {
+  ESP_LOGW(TAG, "Waiting for wakeup pin state change");
+  return false;   // -> es wird nicht geschlafen
+}
+```
+
+Geprüft wird bei **jedem** Schlafversuch, nicht nur beim Booten — Umlegen wirkt
+in beide Richtungen. Und weil derselbe Pin Weckpin ist, holt ein Umlegen
+*während* des Schlafs das Gerät sofort hoch.
+
+Ein **rastender** Schalter ist hier zwingend, kein Taster: Ein Momentkontakt
+wäre beim nächsten Schlafversuch längst wieder offen.
+
+**Software — `input_boolean.stockwaage_wachhalten`,** gespiegelt über einen
+`binary_sensor: platform: homeassistant`, ausgewertet in `on_boot` mit
+`deep_sleep.prevent`.
+
+> Bewusst **kein** Template-Switch auf dem Gerät, obwohl der seinen Zustand über
+> NVS behalten würde: Ein Umlegen **während des Schlafs** ginge verloren, weil
+> das Gerät nicht erreichbar ist — und genau das ist der Hauptfall („ich will
+> gleich ein OTA fahren"). Der `homeassistant`-Sensor holt sich beim Verbinden
+> den *aktuellen* Stand des Helfers; Umlegen im Schlaf wirkt damit beim nächsten
+> Aufwachen.
+
+**Der Softwareschalter ist zugleich der einzige Weg zu OTA.** Ohne ihn ist das
+Gerät nach dem ersten Flash mit aktivem Deep Sleep praktisch nur noch über USB
+erreichbar (Abschnitt 5).
+
+### 9.5 Was am Messkonzept angepasst wurde
+
+**Der HX711 wird im Weckfenster schneller abgetastet: 100 ms statt 1 s.** Die
+Filterkette (Median 5 → gleitendes Mittel 12) braucht bei 1 s rund **60 s**, bis
+hinten der erste Wert herauskommt — länger als das ganze Weckfenster. Bei 100 ms
+ist sie nach gut **6 s** voll, bei identischer Glättung. 10 Werte/s ist zugleich
+die Wandlungsrate des HX711 bei Gain 128.
+
+**Veröffentlicht wird explizit in `on_boot`, nicht über den 60-s-Taktgeber der
+Basis** — der feuert erst nach dem Ende des Weckfensters. Reihenfolge wie dort:
+erst `messfenster_abschliessen` (setzt die `mittel_*`-Globals), dann
+`messwerte_veroeffentlichen`.
+
+**Das Messfenster schrumpft, und damit die Genauigkeit.** Der Gewinn aus dem
+Sessionbericht 11.08. (bei 6 h Intervall ~4.300 Werte statt 12, simulierte
+Reststreuung 2,2 g → 0,1 g) ist im Deep-Sleep-Betrieb nicht zu haben: In den
+~12 s nach dem Einschwingen kommen rund 25 Werte zusammen. Das ist gegenüber
+der Auflösung von 0,1 kg unkritisch, sollte aber niemanden überraschen, der die
+beiden Geräte vergleicht.
+
+**`deep_sleep.enter` wird bewusst nicht aufgerufen.** Das Einschlafen erledigt
+`run_duration`. Grund: `begin_sleep(bool manual)` überspringt die
+`prevent_`-Prüfung, wenn `manual` gesetzt ist — ein explizites `enter` könnte
+also am Wachhalten vorbeischlafen. Über `run_duration` greifen `prevent` und
+`KEEP_AWAKE` beide zuverlässig.
+
+**Nebenwirkung, die gefällt:** Solange wachgehalten wird, übernimmt nach der
+ersten Veröffentlichung wieder der normale Taktgeber der Basis — das Gerät
+verhält sich dann exakt wie im Netzbetrieb, samt Durchsichtmodus und
+Kalibrier-Sperre.
+
+**Weiter offen:** `web_server` ist entfernt (RAM und Weckzeit), `fast_connect`
+gesetzt. Eine feste `manual_ip` würde zusätzlich DHCP sparen, ist aber bewusst
+nicht geraten — eine falsche Netzmaske heißt im Deep-Sleep-Betrieb USB-Kabel.
+Die `uptime`-Entity verliert ihren Sinn, sie beginnt bei jedem Aufwachen neu.
+
+### 9.6 Offen für den ESP32
+
+1. **Ruhestrom messen** — unverändert Punkt 8.1. Erst diese Zahl sagt, ob aus
+   Variante C (~17 Tage) wirklich Variante D (~200 Tage) wird.
+2. **Spannungsabfall über den BS250 messen** — siehe 9.2. Entscheidet, ob der
+   Typ taugt.
+3. **Einschwingzeit des HX711 nach Power-Down ausmessen.** `einschwingzeit` steht
+   auf 12 s, geschätzt mit Reserve. Jede eingesparte Sekunde geht direkt in die
+   Laufzeit.
+4. **Durchsicht-Taster.** GPIO34 ist weckfähig, ein Druck *könnte* das Gerät
+   also wecken — anders als beim ESP8266. Nicht eingebaut: ext0 ist bereits vom
+   Wachhalten-Schalter belegt, für zwei Weckquellen bräuchte es `ext1` mit
+   beiden Pins, und GPIO34 braucht dafür seinen externen Pull-up. Bis dahin gilt
+   die Empfehlung aus Abschnitt 5: rastender Schalter statt Taster.
+
