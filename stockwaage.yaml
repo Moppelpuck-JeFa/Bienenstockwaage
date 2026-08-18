@@ -1,18 +1,19 @@
 # =====================================================================
 # Stock "Stockwaage" - ESP32 NodeMCU
 # =====================================================================
-# Reine BOARD-PORTIERUNG von waage-eg auf ein ESP32 DOIT DevKit V1
-# (NodeMCU-32S-kompatibel), Netzteilbetrieb. Kein Deep Sleep, kein
-# Solar-/Batteriebetrieb - dafuer gilt weiterhin
-# docs/deep-sleep-vorbereitung.md, und die dortigen Ueberlegungen zum
-# ESP8266-Weckpin GPIO16 sind auf dem ESP32 hinfaellig.
+# Portierung von waage-eg auf ein ESP32 DOIT DevKit V1
+# (NodeMCU-32S-kompatibel), plus Deep Sleep mit BS250-Lastschalter.
+# Hintergrund und Messvorschriften: docs/deep-sleep-vorbereitung.md,
+# dort Abschnitt 9 fuer alles ESP32-Spezifische - die Abschnitte 1-8
+# sind fuer den ESP8266 geschrieben und stimmen hier teils nicht.
 #
 # Die gesamte Messlogik kommt UNVERAENDERT aus packages/waage-basis.yaml -
 # derselben Datei, aus der auch waage-eg geflasht wird. Es gibt bewusst
 # KEINE ESP32-Kopie der Basis: eine zweite Kopie von 1.500 Zeilen Logik
 # wuerde beim naechsten Feinschliff auseinanderlaufen, und zwar still.
-# Stattdessen werden hier genau die drei Stellen ueberschrieben, an denen
-# der ESP32 sich vom ESP8266 unterscheidet (siehe unten).
+# Stattdessen werden hier nur die Stellen ueberschrieben, an denen der
+# ESP32 sich vom ESP8266 unterscheidet, und der Deep-Sleep-Teil ergaenzt
+# (beides unten einzeln kommentiert).
 #
 # waage-eg.yaml ist dabei NICHT angefasst worden, packages/waage-basis.yaml
 # ebenfalls nicht. Diese Datei kann also nichts am produktiven Geraet
@@ -173,10 +174,10 @@ substitutions:
   start_calib_kg_ref: "0.5"
 
   # --- Startwerte der Einstell-Entities ---
-  # Ebenfalls unveraendert. Das Messintervall bleibt bei 6 h, damit diese
-  # Portierung sich vom Verhalten her nicht von waage-eg unterscheidet;
-  # zum Testen laesst es sich in HA jederzeit herunterstellen (es ist eine
-  # Number-Entity, kostet also keinen Flash).
+  # ACHTUNG, im Deep-Sleep-Betrieb ist "Messintervall" NICHT mehr der
+  # Takt: den bestimmt "schlafdauer" oben. Die Number wirkt nur, solange
+  # das Geraet wachgehalten wird - dann uebernimmt wieder der Taktgeber
+  # der Basis. Nur der Startwert fuer den allerersten Boot.
   start_referenzgewicht: "0.5"
   start_messintervall: "360"        # min (= 6 h)
   start_durchsicht_dauer: "60"      # min
