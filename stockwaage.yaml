@@ -153,7 +153,7 @@ substitutions:
   # Wachzeit pro Aufwachen. Muss decken: WLAN-Verbindung (~5-10 s),
   # Einschwingen unten, Veroeffentlichen, etwas Luft. Jede Sekunde hier
   # geht direkt in die Tagesbilanz - das ist die teuerste Zahl der Datei.
-  wachzeit: "35s"
+  wachzeit: "45s"
 
   # Wartezeit nach dem Einschalten des HX711, bevor gemessen wird.
   # Deckt zweierlei: der HX711 braucht nach dem Power-Up ein paar hundert
@@ -326,6 +326,29 @@ binary_sensor:
   - platform: homeassistant
     id: wachhalten_ha
     entity_id: input_boolean.stockwaage_wachhalten
+    # DIE Stelle, an der das Wachhalten wirklich haengt - nicht der
+    # on_boot-Block unten.
+    #
+    # Warum: on_boot wartet auf "api.connected" und prueft DANN. Der
+    # Zustand dieses Sensors kommt aber erst ein Stueck NACH dem
+    # Verbindungsaufbau herein. Die Pruefung lief damit mal vor und mal
+    # nach dem Eintreffen - am 18.08.2026 am Geraet beobachtet: einmal
+    # blieb es wach, beim naechsten Boot schlief es trotz gesetztem
+    # Helfer ein. Ein Wettlauf, kein Zufall.
+    #
+    # on_state feuert, sobald der Zustand da ist - auch beim allerersten
+    # Eintreffen nach dem Verbinden. Und es wirkt zusaetzlich zur
+    # Laufzeit, wenn man den Helfer umlegt, waehrend das Geraet wach ist.
+    on_state:
+      - if:
+          condition:
+            binary_sensor.is_on: wachhalten_ha
+          then:
+            - deep_sleep.prevent: tiefschlaf
+            - logger.log: "Wachhalten (HA) an - Deep Sleep ausgesetzt"
+          else:
+            - deep_sleep.allow: tiefschlaf
+            - logger.log: "Wachhalten (HA) aus - Deep Sleep wieder frei"
 
   # --- Hardwareschalter, nur zur Anzeige ---
   # Das Wachhalten selbst macht NICHT dieser binary_sensor, sondern
@@ -445,11 +468,26 @@ switch:
 # bei 100 ms liefert der Median alle 0,5 s, die Kette ist nach gut 6 s
 # voll. Dieselbe Glaettung, ein Zehntel der Zeit.
 #
-# 10 Werte/s ist zugleich die Wandlungsrate des HX711 bei Gain 128 - ein
-# schnelleres Intervall braeuchte den 80-SPS-Modus und andere Hardware.
+# NICHT 100 ms, obwohl das rechnerisch zur Wandlungsrate passen wuerde.
+# Der ESPHome-Treiber WARTET NICHT auf "Daten bereit" (hx711.cpp):
+#
+#   if (this->dout_pin_->digital_read()) {
+#     ESP_LOGW(TAG, "HX711 is not ready for new measurements yet!");
+#     return false;            // veroeffentlicht nichts
+#   }
+#
+# Bei Gain 128 wandelt der HX711 mit ~10 Werten/s. Pollt man mit genau
+# 100 ms, greift man staendig knapp daneben und verwirft Messungen -
+# im schlimmsten Fall dauerhaft, weil ESP-Timer und HX711-Oszillator
+# zueinander stehenbleiben koennen. Etwas LANGSAMER als die Wandlung
+# abzutasten ist deshalb strikt besser: dann liegt immer ein fertiger
+# Wert bereit.
+#
+# 150 ms: Median alle 0,75 s, die Kette ist nach ~9 s voll - passt
+# weiterhin unter die einschwingzeit von 12 s.
 sensor:
   - id: !extend hx711_raw_counts
-    update_interval: 100ms
+    update_interval: 150ms
 
 # --- Kein Webserver im Batteriebetrieb ---
 # Kostet RAM und im Weckfenster Rechenzeit, und die Weboberflaeche ist bei
@@ -468,7 +506,7 @@ esphome:
         # gefuelltem Messfenster ein.
         - wait_until:
             condition: api.connected
-            timeout: 20s
+            timeout: 15s
         - if:
             condition:
               binary_sensor.is_on: wachhalten_ha
