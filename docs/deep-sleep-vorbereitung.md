@@ -496,15 +496,57 @@ gesetzt. Eine feste `manual_ip` würde zusätzlich DHCP sparen, ist aber bewusst
 nicht geraten — eine falsche Netzmaske heißt im Deep-Sleep-Betrieb USB-Kabel.
 Die `uptime`-Entity verliert ihren Sinn, sie beginnt bei jedem Aufwachen neu.
 
+### 9.7 Einschwingzeit des HX711 — gemessen, und teurer als gedacht
+
+**Am 18.08.2026 am Gerät gemessen**, nachdem der BS250 verlötet war. Das war
+Punkt 8.2 der offenen Liste, und die Antwort fällt gegen den Entwurf aus.
+
+Ablauf: Versorgung über `switch.…_hx711_versorgung` abgeschaltet, wieder
+eingeschaltet, Rohwerte im Gerätelog mitgelesen.
+
+| Zeit nach Einschalten | Rohwert | Streubreite |
+|---|---|---|
+| 0 s | ~ −1.000 | — |
+| 21 s | ~ −400.000 | ~100.000 counts (≈ 5 kg) |
+| 90 s | **−718.300** | ~300 counts (≈ 14 g) |
+
+Der Zielwert lag bei −718.300. Nach 21 Sekunden fehlten also noch rund
+**320.000 counts ≈ 15 kg**, und der Wert wanderte weiter.
+
+**Was das im Betrieb anrichtet:** Mit der ursprünglich geschätzten
+`einschwingzeit: 12s` veröffentlichte der erste Messzyklus **7,9 kg statt
+33,8 kg**. Dieser Wert ist *plausibel* — er wäre glatt durch das
+Plausibilitätsfenster (−1…150 kg) gegangen und hätte dauerhaft in der
+Langzeitstatistik gestanden. Aufgefallen ist es allein an **„Rohwert
+Streuung": 176.015 counts, also rund 8,5 kg.** Genau für diesen Fall wurde die
+Entity am 11.08. gebaut, und hier hat sie sich zum ersten Mal bezahlt gemacht.
+
+`einschwingzeit` steht deshalb jetzt auf **90 s**, `wachzeit` auf **120 s**.
+
+**Die Folge für die Batterierechnung ist unangenehm.** Bei 60 min Intervall
+sind 120 s Wachzeit gut **3 % Einschaltdauer** — der wache ESP32 frisst damit
+den Gewinn des HX711-Power-Downs wieder auf, und Variante D aus Abschnitt 6
+ist so nicht erreichbar. Die Rechnung dreht sich erst mit einem deutlich
+längeren Intervall: bei 6 h liegt die Einschaltdauer unter 1 %.
+
+Das ist eine Entscheidung über die Messdichte, keine technische — deshalb
+steht `schlafdauer` unverändert auf 60 min, mit einem Hinweis im YAML.
+
+**Noch nicht ausgereizt:** Ob die 90 s wirklich nötig sind oder ob ein Teil
+davon auf das Warmlaufen der Brücke entfällt, das man mit einer Korrektur
+erschlagen könnte, ist offen. Ebenso, ob ein kürzerer Power-Down (z. B. nur
+zwischen den Messungen einer Stunde) schneller einschwingt als ein kalter.
+
 ### 9.6 Offen für den ESP32
 
 1. **Ruhestrom messen** — unverändert Punkt 8.1. Erst diese Zahl sagt, ob aus
    Variante C (~17 Tage) wirklich Variante D (~200 Tage) wird.
 2. **Spannungsabfall über den BS250 messen** — siehe 9.2. Entscheidet, ob der
    Typ taugt.
-3. **Einschwingzeit des HX711 nach Power-Down ausmessen.** `einschwingzeit` steht
-   auf 12 s, geschätzt mit Reserve. Jede eingesparte Sekunde geht direkt in die
-   Laufzeit.
+3. ~~**Einschwingzeit des HX711 nach Power-Down ausmessen.**~~ **Erledigt am
+   18.08.2026, siehe 9.7** — rund 90 s, deutlich mehr als die geschätzten 12 s.
+   Damit steht die Wirtschaftlichkeit des ganzen Power-Downs bei kurzen
+   Messintervallen in Frage.
 4. **Durchsicht-Taster.** GPIO34 ist weckfähig, ein Druck *könnte* das Gerät
    also wecken — anders als beim ESP8266. Nicht eingebaut: ext0 ist bereits vom
    Wachhalten-Schalter belegt, für zwei Weckquellen bräuchte es `ext1` mit

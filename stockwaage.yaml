@@ -148,20 +148,49 @@ substitutions:
   # Schlafdauer = Messintervall. Der ESP32 hat hier NICHT das 71-Minuten-
   # Limit des ESP8266 (dort steckt die Zeit in 32 Bit Mikrosekunden);
   # der ESP32 rechnet in 64 Bit, Stunden sind also problemlos.
+  #
+  # ACHTUNG, DIESE ZAHL ENTSCHEIDET JETZT UEBER DEN GANZEN NUTZEN:
+  # Seit die Einschwingzeit gemessen ist (siehe unten), kostet jedes
+  # Aufwachen rund 120 s Wachzeit. Bei 60 min Intervall sind das gut 3 %
+  # Einschaltdauer - damit frisst der wache ESP32 den Gewinn des
+  # HX711-Power-Downs wieder auf. Erst ein deutlich laengeres Intervall
+  # (Groessenordnung 6 h, wie bei waage-eg) bringt die Einschaltdauer
+  # unter 1 % und damit die Rechnung aus Abschnitt 6 des
+  # Vorbereitungsdokuments zum Tragen.
+  #
+  # Bewusst NICHT eigenmaechtig hochgesetzt - das ist eine imkerliche
+  # Entscheidung ueber die Messdichte, keine technische.
   schlafdauer: "60min"
 
   # Wachzeit pro Aufwachen. Muss decken: WLAN-Verbindung (~5-10 s),
   # Einschwingen unten, Veroeffentlichen, etwas Luft. Jede Sekunde hier
   # geht direkt in die Tagesbilanz - das ist die teuerste Zahl der Datei.
-  wachzeit: "45s"
+  #
+  # 120 s statt der urspruenglich geschaetzten 45 s: die Einschwingzeit
+  # unten wurde am 18.08.2026 gemessen und war viel laenger als gedacht.
+  wachzeit: "120s"
 
   # Wartezeit nach dem Einschalten des HX711, bevor gemessen wird.
-  # Deckt zweierlei: der HX711 braucht nach dem Power-Up ein paar hundert
-  # Millisekunden bis zur ersten gueltigen Wandlung, und die Filterkette
-  # (Median 5 -> gleitendes Mittel 12) muss volllaufen. Mit dem schnelleren
-  # Abtasttakt unten sind das rund 6 s; 12 s sind bewusst Reserve.
-  # AM GERAET NACHMESSEN - siehe docs/deep-sleep-vorbereitung.md, Punkt 8.2.
-  einschwingzeit: "12s"
+  #
+  # AM GERAET GEMESSEN am 18.08.2026, und das Ergebnis war die
+  # unangenehmste Ueberraschung des Umbaus. Geschaetzt waren 12 s, weil
+  # die Filterkette nach ~9 s vollaeuft. Der HX711 samt Bruecke braucht
+  # aber viel laenger, bis der Wert ueberhaupt stimmt:
+  #
+  #   nach   0 s:  ~     -1.000 counts
+  #   nach  21 s:  ~   -400.000 counts, Streubreite ~100.000 (5 kg!)
+  #   nach  90 s:  ~   -718.300 counts, Streubreite ~300 (14 g)  <- fertig
+  #
+  # Mit 12 s Wartezeit hat der erste Messzyklus 7,9 kg statt 33,8 kg
+  # veroeffentlicht - ein PLAUSIBLER Wert, der glatt durch das
+  # Plausibilitaetsfenster (-1..150 kg) gegangen waere. Aufgefallen ist es
+  # nur an "Rohwert Streuung": 176.015 counts, also rund 8,5 kg. Genau
+  # dafuer gibt es die Entity.
+  #
+  # 90 s sind deshalb kein Komfortwert, sondern das Minimum. Ueber mehrere
+  # echte Zyklen gegenpruefen: bleibt die Streuung im Bereich einiger
+  # hundert counts, stimmt es.
+  einschwingzeit: "90s"
 
   # --- Startwerte der Kalibrierung ---
   # Unveraendert von waage-eg uebernommen, und zwar absichtlich als
