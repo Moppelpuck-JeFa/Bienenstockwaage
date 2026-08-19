@@ -166,9 +166,12 @@ substitutions:
   # Einschwingen unten, Veroeffentlichen, etwas Luft. Jede Sekunde hier
   # geht direkt in die Tagesbilanz - das ist die teuerste Zahl der Datei.
   #
-  # 120 s statt der urspruenglich geschaetzten 45 s: die Einschwingzeit
+  # 200 s statt der urspruenglich geschaetzten 45 s: die Einschwingzeit
   # unten wurde am 18.08.2026 gemessen und war viel laenger als gedacht.
-  wachzeit: "120s"
+  # Von 120 auf 200 s am Geraet nachgezogen - hier uebernommen, damit
+  # Repo und geflashte Datei nicht auseinanderlaufen. Am 19.08.2026 in HA
+  # bestaetigt: das Geraet schlief 200,2 s nach dem Booten ein.
+  wachzeit: "200s"
 
   # Wartezeit nach dem Einschalten des HX711, bevor gemessen wird.
   #
@@ -355,6 +358,34 @@ binary_sensor:
   - platform: homeassistant
     id: wachhalten_ha
     entity_id: input_boolean.stockwaage_wachhalten
+
+    # OHNE DIESE ZEILE FEUERT on_state BEIM AUFWACHEN NICHT.
+    #
+    # Das war der Fehler vom 19.08.2026: Helfer stand auf "an", das Geraet
+    # kam hoch, holte den Zustand - und schlief nach run_duration trotzdem
+    # ein. Im YAML ist davon nichts zu sehen; nachgesehen im Quelltext von
+    # ESPHome 2026.7.4, binary_sensor/__init__.py:
+    #
+    #   trigger = config.get(CONF_TRIGGER_ON_INITIAL_STATE, False) or ...
+    #   cg.add(var.set_trigger_on_initial_state(trigger))
+    #
+    # Die Vorgabe in binary_sensor.h ist zwar true, der Codegenerator
+    # ueberschreibt sie aber IMMER - fehlt der Schluessel, mit false.
+    # Ausgewertet wird das in core/entity_base.h:
+    #
+    #   if (new_state.has_value() &&
+    #       (had_state || this->get_trigger_on_initial_state()))
+    #     this->state_callbacks_.call(new_state.value());
+    #
+    # Der erste Zustand aus HA laeuft ueber publish_initial_state(), und
+    # das ruft vorher invalidate_state() - had_state ist also false. Der
+    # allererste Wert nach dem Booten loest damit kein on_state aus.
+    #
+    # An einem dauerhaft laufenden Geraet faellt das nie auf: jedes
+    # spaetere Umlegen hat had_state=true. An einem Deep-Sleep-Geraet ist
+    # der erste Wert der EINZIGE, auf den es ankommt.
+    trigger_on_initial_state: true
+
     # DIE Stelle, an der das Wachhalten wirklich haengt - nicht der
     # on_boot-Block unten.
     #
@@ -529,19 +560,34 @@ esphome:
     # LATE: WLAN und API sind zu diesem Zeitpunkt am Starten.
     - priority: -100
       then:
-        # Erst auf HA warten - ohne API-Verbindung ist der Softwareschalter
-        # nicht lesbar. Der timeout ist das Sicherheitsnetz: ohne ihn haenge
-        # das Geraet bei WLAN-Ausfall bis run_duration und schliefe nie mit
-        # gefuelltem Messfenster ein.
+        # Auf den ZUSTAND warten, nicht auf die Verbindung. api.connected
+        # ist zu frueh: der Wert des homeassistant-binary_sensors trifft
+        # erst ein Stueck nach dem Verbindungsaufbau ein, die Pruefung lief
+        # damit mal vor und mal nach ihm (am 18.08.2026 am Geraet
+        # beobachtet). has_state() ist wahr, sobald der Wert wirklich da
+        # ist - und impliziert die Verbindung.
+        #
+        # Der timeout ist das Sicherheitsnetz: ohne ihn haenge das Geraet
+        # bei WLAN-Ausfall bis run_duration und schliefe nie mit gefuelltem
+        # Messfenster ein. 20 s + einschwingzeit passen unter wachzeit.
+        #
+        # Zusammen mit trigger_on_initial_state oben ist das doppelt
+        # gemoppelt, und zwar mit Absicht: der on_state-Weg wirkt auch,
+        # wenn der Helfer waehrend des Weckfensters umgelegt wird, dieser
+        # hier auch dann noch, wenn eine kuenftige ESPHome-Version an der
+        # Rueckruf-Logik wieder etwas dreht.
         - wait_until:
-            condition: api.connected
-            timeout: 15s
+            condition:
+              lambda: 'return id(wachhalten_ha).has_state();'
+            timeout: 20s
         - if:
             condition:
               binary_sensor.is_on: wachhalten_ha
             then:
               - deep_sleep.prevent: tiefschlaf
               - logger.log: "Wachhalten ueber HA aktiv - Deep Sleep ausgesetzt"
+            else:
+              - logger.log: "Wachhalten aus oder Zustand nicht eingetroffen - regulaerer Ablauf"
         # Einschwingen lassen, dann GENAU EINMAL veroeffentlichen.
         # Bewusst nicht dem 60-s-Taktgeber der Basis ueberlassen: der feuert
         # erst nach dem Ende des Weckfensters. Reihenfolge wie dort -
