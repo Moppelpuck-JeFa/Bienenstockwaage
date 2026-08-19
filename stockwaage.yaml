@@ -143,21 +143,19 @@ substitutions:
   # GPIO34-39, wo einer extern noetig waere. Geschlossen = LOW = wach.
   pin_wachhalten: GPIO33
 
-  # Schlafdauer = Messintervall. Der ESP32 hat hier NICHT das 71-Minuten-
-  # Limit des ESP8266 (dort steckt die Zeit in 32 Bit Mikrosekunden);
-  # der ESP32 rechnet in 64 Bit, Stunden sind also problemlos.
+  # NUR NOCH RUECKFALLWERT. Die echte Schlafdauer kommt zur Laufzeit aus
+  # der Number "Messintervall" - siehe Skript schlafdauer_koppeln weiter
+  # unten. Diese Zahl gilt allein in dem Fenster zwischen dem Start des
+  # deep_sleep-Komponenten-Setups und dem ersten Lauf des Skripts, und als
+  # Notnagel, falls die Number keinen Wert hat.
   #
-  # ACHTUNG, DIESE ZAHL ENTSCHEIDET JETZT UEBER DEN GANZEN NUTZEN:
-  # Seit die Einschwingzeit gemessen ist (siehe unten), kostet jedes
-  # Aufwachen rund 120 s Wachzeit. Bei 60 min Intervall sind das gut 3 %
-  # Einschaltdauer - damit frisst der wache ESP32 den Gewinn des
-  # HX711-Power-Downs wieder auf. Erst ein deutlich laengeres Intervall
-  # (Groessenordnung 6 h, wie bei waage-eg) bringt die Einschaltdauer
-  # unter 1 % und damit die Rechnung aus Abschnitt 6 des
-  # Vorbereitungsdokuments zum Tragen.
+  # Bewusst KURZ gewaehlt. Ein zu kurzer Rueckfallwert kostet ein
+  # ueberfluessiges Aufwachen; ein zu langer legt die Waage im Fehlerfall
+  # tagelang schlafen, ohne dass jemand herankommt.
   #
-  # Bewusst NICHT eigenmaechtig hochgesetzt - das ist eine imkerliche
-  # Entscheidung ueber die Messdichte, keine technische.
+  # Der ESP32 hat hier NICHT das 71-Minuten-Limit des ESP8266 (dort steckt
+  # die Zeit in 32 Bit Mikrosekunden); er rechnet in 64 Bit, Tage sind also
+  # problemlos.
   schlafdauer: "60min"
 
   # Wachzeit pro Aufwachen. Muss decken: WLAN-Verbindung (~5-10 s),
@@ -169,7 +167,13 @@ substitutions:
   # Von 120 auf 200 s am Geraet nachgezogen - hier uebernommen, damit
   # Repo und geflashte Datei nicht auseinanderlaufen. Am 19.08.2026 in HA
   # bestaetigt: das Geraet schlief 200,2 s nach dem Booten ein.
-  wachzeit: "200s"
+  #
+  # ZWEIMAL DERSELBE WERT, und zwar zwangslaeufig: deep_sleep braucht eine
+  # Zeitangabe mit Einheit, der Lambda in schlafdauer_koppeln braucht eine
+  # reine Zahl (Sekunden). Deshalb steht die Zahl einmal da und die
+  # Einheit haengt daran - wer 200 aendert, aendert beides.
+  wachzeit_s: "200"
+  wachzeit: "${wachzeit_s}s"
 
   # Wartezeit nach dem Einschalten des HX711, bevor gemessen wird.
   #
@@ -204,10 +208,12 @@ substitutions:
   start_calib_kg_ref: "0.5"
 
   # --- Startwerte der Einstell-Entities ---
-  # ACHTUNG, im Deep-Sleep-Betrieb ist "Messintervall" NICHT mehr der
-  # Takt: den bestimmt "schlafdauer" oben. Die Number wirkt nur, solange
-  # das Geraet wachgehalten wird - dann uebernimmt wieder der Taktgeber
-  # der Basis. Nur der Startwert fuer den allerersten Boot.
+  # "Messintervall" IST der Takt, auch im Deep-Sleep-Betrieb: das Skript
+  # schlafdauer_koppeln setzt sleep_duration daraus. Die Number hat damit
+  # dieselbe Bedeutung wie im Wachbetrieb - eingestellt wird sie in HA,
+  # der Wert hier gilt nur fuer den allerersten Boot mit leerem NVS.
+  #
+  # Die Basis laesst 1 min bis 10.080 min (7 Tage) zu. 72 h sind 4.320 min.
   start_referenzgewicht: "0.5"
   start_messintervall: "360"        # min (= 6 h)
   start_durchsicht_dauer: "60"      # min
@@ -492,6 +498,59 @@ deep_sleep:
     allow_other_uses: true      # Gegenstueck zum binary_sensor oben
   wakeup_pin_mode: KEEP_AWAKE
 
+# --- Schlafdauer an das Messintervall koppeln ---
+# Ohne das gibt es zwei Takte, die nichts voneinander wissen: sleep_duration
+# bestimmt, wann gemessen wird, und die Number "Messintervall" bestimmt, was
+# in HA als Messintervall steht. Wer die Number verstellt, aendert dann nur
+# die Beschriftung - genau die Sorte stiller Abweichung, die man erst nach
+# Tagen an der Kurve merkt.
+#
+# Gerechnet wird mit der PERIODE, nicht mit der Schlafdauer:
+#
+#     Messintervall = Schlafdauer + Wachzeit
+#
+# Der Abstand zwischen zwei Messungen ist damit wirklich der eingestellte
+# Wert. Bei 72 h faellt die Wachzeit nicht ins Gewicht (0,08 %), bei 30 min
+# waeren es 11 % - und ohne den Abzug liefe die Messreihe langsam weg.
+#
+# set_sleep_duration nimmt Millisekunden als uint32_t (deep_sleep_component.h).
+# Das reicht bis 49,7 Tage; die Obergrenze der Number sind 7 Tage.
+script:
+  - id: schlafdauer_koppeln
+    then:
+      - lambda: |-
+          const float min_f = id(mess_intervall).state;
+          // Beim allerersten Boot hat die Number noch keinen Wert. Dann
+          // bleibt der Rueckfallwert aus den substitutions stehen.
+          if (std::isnan(min_f) || min_f < 1.0f) {
+            ESP_LOGW("waage", "Messintervall noch ohne Wert - Schlafdauer "
+                              "bleibt beim Rueckfallwert");
+            return;
+          }
+          const uint32_t wach_ms = ${wachzeit_s} * 1000UL;
+          const uint64_t periode_ms = (uint64_t) (min_f * 60000.0);
+          // Untergrenze 60 s: bei einem Messintervall, das kuerzer ist als
+          // die Wachzeit, ergaebe die Subtraktion sonst einen Unterlauf.
+          // Ein solches Intervall ist im Deep-Sleep-Betrieb ohnehin sinnlos -
+          // es soll aber nicht zu 49 Tagen Schlaf fuehren.
+          const uint32_t schlaf_ms =
+              periode_ms > (uint64_t) wach_ms + 60000ULL
+                  ? (uint32_t) (periode_ms - wach_ms)
+                  : 60000UL;
+          id(tiefschlaf).set_sleep_duration(schlaf_ms);
+          ESP_LOGI("waage",
+                   "Messintervall %.0f min -> Schlafdauer %u s (+ %u s wach)",
+                   min_f, schlaf_ms / 1000UL, wach_ms / 1000UL);
+
+# Die Number selbst kommt aus der Basis; !extend haengt nur eine weitere
+# Aktion an ihr on_value an (Listen aus Packages werden aneinandergehaengt).
+# Damit wirkt ein Verstellen in HA sofort - und auch beim Booten, weil
+# restore_value die Number wiederherstellt und dabei on_value ausloest.
+number:
+  - id: !extend mess_intervall
+    on_value:
+      - script.execute: schlafdauer_koppeln
+
 # --- Lastschalter fuer den HX711 (BS250) ---
 # Der eigentliche Zweck der Uebung. Laut docs/deep-sleep-vorbereitung.md
 # ziehen HX711 und Waegezellenbruecke zusammen ~5,8 mA DAUERHAFT - der
@@ -558,6 +617,37 @@ esphome:
     # LATE: WLAN und API sind zu diesem Zeitpunkt am Starten.
     - priority: -100
       then:
+        # ZUERST die Schlafdauer setzen, noch vor jedem Warten. Sonst
+        # schliefe ein Geraet, das die API nicht erreicht, mit dem
+        # Rueckfallwert statt mit dem eingestellten Intervall.
+        - script.execute: schlafdauer_koppeln
+
+        # DEN ANLAUF DES TAKTGEBERS UEBERSPRINGEN.
+        #
+        # Der interval-60s-Block der Basis prueft "erste_messung_erfolgt".
+        # Das Global ist restore_value: no, nach jedem Aufwachen aus dem
+        # Tiefschlaf also wieder false - der Taktgeber haelt sich damit fuer
+        # frisch gebootet und veroeffentlicht schon nach 60 s, damit nach
+        # einem Neustart nicht ein ganzes Intervall lang nichts in HA steht.
+        #
+        # An einem dauerhaft laufenden Geraet ist das richtig. Hier ist es
+        # falsch: 60 s liegen VOR den gemessenen 90 s Einschwingzeit. Am
+        # 19.08.2026 in der HA-Historie belegt - pro Weckfenster zwei
+        # Sendevorgaenge, bei 60,58 s und bei 94,64 s.
+        #
+        # Solange der BS250 abgeklemmt ist und der HX711 durchlaeuft, faellt
+        # das nicht auf. Mit Lastschalter ist der 60-s-Wert der halb
+        # eingeschwungene: gemessen ~-400.000 counts statt -718.300, also
+        # rund 15 kg daneben - und plausibel genug, um durch das
+        # Plausibilitaetsfenster zu gehen. Bei 72 h Messintervall waere das
+        # jede zweite Zahl der Messreihe.
+        #
+        # Das Senden im Weckfenster uebernimmt der Block weiter unten, nach
+        # der Einschwingzeit. Der Taktgeber bleibt fuer den Wachbetrieb
+        # zustaendig (Wachhalten-Schalter) und laeuft dort ueber
+        # minuten_seit_messung >= Messintervall.
+        - lambda: 'id(erste_messung_erfolgt) = true;'
+
         # Auf den ZUSTAND warten, nicht auf die Verbindung. api.connected
         # ist zu frueh: der Wert des homeassistant-binary_sensors trifft
         # erst ein Stueck nach dem Verbindungsaufbau ein, die Pruefung lief
