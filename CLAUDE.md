@@ -9,17 +9,31 @@ Commit-Messages. Das ist durchgehend so und soll so bleiben.
 
 ## Worum es geht
 
-ESPHome-Bienenstockwaage (ESP8266 D1 Mini + HX711 + 4 Wägezellen), angebunden an
-Home Assistant. **Ein Gerät läuft produktiv** (`waage-eg`) und sammelt seit
-Wochen eine durchgehende Messreihe; zwei weitere Stock-Dateien sind vorbereitet,
-aber ohne Hardware.
+ESPHome-Bienenstockwaage (HX711 + 4 Wägezellen), angebunden an Home Assistant.
 
-Daraus folgen zwei Dinge, die fast jede Änderung betreffen:
+**Es gibt genau ein Gerät: `stockwaage`** — ESP32 DOIT DevKit V1, mit Deep
+Sleep. Geflasht wird `stockwaage.yaml`, die Logik kommt aus
+`packages/waage-basis.yaml`.
 
-- **Eine Änderung an `packages/waage-basis.yaml` wirkt beim nächsten Flash auf
-  alle Stöcke.** Vorher gegen jeden prüfen.
-- **Ein Flash kann die Kalibrierung kosten** — siehe unten. Das ist kein
-  Randfall, sondern zweimal real passiert.
+**`waage-eg` (ESP8266 D1 Mini) existiert nicht mehr** (Stand 19.08.2026 — weder
+im ESPHome Device Builder noch als Entities in HA). Die Datei `waage-eg.yaml`
+und die beiden nie gebauten `waage-stock2/3.yaml` liegen noch im Repo, ebenso
+`waage-eg-notes.md` und `waage-eg-claude-code-kontext.md`. **Das ist Archiv, kein
+laufender Betrieb.** Alles darin, was im Präsens von einem produktiven Gerät oder
+von einer laufenden Messreihe spricht, ist überholt.
+
+Zwei Dinge, die früher fast jede Änderung bestimmt haben und **jetzt nicht mehr
+gelten**:
+
+- „Eine Änderung an der Basis wirkt auf alle Stöcke" — es gibt nur noch einen
+  Abnehmer. Die Basis darf geändert werden, ohne ein zweites Gerät zu gefährden.
+- „Ein Flash kann die Kalibrierung kosten" — das war ein
+  ESP8266-Preferences-Problem (siehe unten). Auf dem ESP32 fällt es strukturell
+  weg.
+
+Was **bleibt**: `stockwaage` sammelt eine Messreihe, ihre entity_ids hängen an
+Dashboard und Helfern, und ein Ausreißer landet dauerhaft in der
+Langzeitstatistik. Die Vorsicht gilt weiter — sie gilt jetzt diesem Gerät.
 
 ## Prüfen ohne Hardware
 
@@ -27,8 +41,8 @@ Ein vollständiger `esphome compile` ist hier nicht möglich (PlatformIO-Registr
 durch die Egress-Policy gesperrt). Deshalb diese zwei Wege:
 
 ```bash
-pip install esphome                    # zuletzt gegen 2026.6.5 geprüft
-esphome config waage-eg.yaml           # ebenso waage-stock2.yaml, waage-stock3.yaml
+pip install esphome                    # zuletzt gegen 2026.7.4 geprüft
+esphome config stockwaage.yaml
 
 cd tests
 g++ -std=c++17 -Wall -Wextra -O2 waage-temperatur-test.cpp -o test && ./test
@@ -42,9 +56,9 @@ danach wieder löschen).
 *aufgelösten* Konfiguration, nicht das Lesen der YAML:
 
 ```bash
-esphome config waage-eg.yaml | sed 's/\x1b\[[0-9;]*m//g' > vorher.txt
+esphome config stockwaage.yaml | sed 's/\x1b\[[0-9;]*m//g' > vorher.txt
 # ... Änderung ...
-esphome config waage-eg.yaml | sed 's/\x1b\[[0-9;]*m//g' > nachher.txt
+esphome config stockwaage.yaml | sed 's/\x1b\[[0-9;]*m//g' > nachher.txt
 diff vorher.txt nachher.txt
 ```
 
@@ -57,14 +71,21 @@ Code. Die Lambda-Körper aus `waage-basis.yaml` sind dort nachgebaut — wer sie
 ändert, muss den Nachbau mitziehen. Das gilt auch für die Filterkette und das
 Messfenster, die Punkt 10 für die Genauigkeitsaussage simuliert.
 
+**Was `esphome config` NICHT fängt:** Optionen, deren Vorgabe der
+Codegenerator setzt statt das YAML. Siehe `trigger_on_initial_state` unter
+„Deep Sleep" — der Fehler war in der aufgelösten Konfiguration unsichtbar und
+nur im ESPHome-Quelltext zu finden. Bei unerklärlichem Verhalten deshalb in
+`site-packages/esphome/components/<komponente>/__init__.py` nachsehen, nicht
+nur in der Doku.
+
 ## Architektur
 
 **Package/Stock-Aufteilung.** `packages/waage-basis.yaml` enthält die gesamte
-Logik und wird **nicht** geflasht. Geflasht werden die Stock-Dateien im Root, die
-nur `substitutions` + `packages:`-Include enthalten. Die Aufteilung ist nicht
-kosmetisch: Das ESPHome Device Builder Add-on listet ausschließlich YAML direkt
-in `/config/esphome/` als flashbare Geräte. Läge die Basis im Root, tauchte sie
-als Pseudo-Gerät auf.
+Logik und wird **nicht** geflasht. Geflasht wird `stockwaage.yaml` im Root, die
+nur `substitutions` + `packages:`-Include + die ESP32- und Deep-Sleep-Teile
+enthält. Die Aufteilung ist nicht kosmetisch: Das ESPHome Device Builder Add-on
+listet ausschließlich YAML direkt in `/config/esphome/` als flashbare Geräte.
+Läge die Basis im Root, tauchte sie als Pseudo-Gerät auf.
 
 Folgen davon, die leicht überraschen:
 
@@ -77,26 +98,35 @@ Folgen davon, die leicht überraschen:
   `esphome config` ab.
 - Werte aus der Stock-Datei haben Vorrang vor denen aus dem Package.
 - Substitutions lassen sich **nicht** in `!secret` hineinschreiben.
+- Listen aus Packages werden **aneinandergehängt**, nicht über die ID
+  zusammengeführt (`merge_config` in `esphome/config_helpers.py`: `old + new`).
+  Ein Eintrag mit derselben ID ist deshalb ein Duplikat-Fehler — dafür gibt es
+  `!extend <id>`. Zum Löschen eines geerbten Schlüssels: `!remove`.
 
-**Zwei entkoppelte Takte.** Der HX711 läuft mit `update_interval: 1s` samt
-Filterkette (Median 5 → gleitender Mittelwert ~60 s), damit Kalibrier- und
+**Die Basis trägt noch einen `esp8266:`-Block**, den `stockwaage.yaml` per
+`!remove` entfernt und durch `esp32:` ersetzt. Das war nötig, solange beide
+Geräte dieselbe Basis teilten. Jetzt ist es nur noch Ballast — auflösen ist
+zulässig, aber eine bewusste Aufräumaktion, kein Nebenbei-Edit.
+
+**Zwei entkoppelte Takte.** Der HX711 läuft mit eigener Abtastung samt
+Filterkette (Median 5 → gleitender Mittelwert), damit Kalibrier- und
 Tara-Buttons immer einen frischen, eingeschwungenen Wert lesen. Alle in HA
 sichtbaren Sensoren stehen auf `update_interval: never`; veröffentlicht wird
 ausschließlich aus einem `interval: 60s`-Block, gesteuert von der Number-Entity
 „Messintervall".
 
 **Das Messintervall ist zugleich das Mittelungsfenster.** Jeder gefilterte
-Rohwert (alle 5 s) und jeder Temperaturwert (alle 60 s) läuft in Summen-Globals
-(`fenster_*`, `temp_fenster_*`); beim Veröffentlichen werden daraus
-`mittel_rohwert`, `mittel_streuung` und `mittel_temperatur`. **Alle Entities
-rechnen gegen diese drei Globals, nie mehr direkt gegen `hx711_raw_counts`.**
-Wer das umgeht, veröffentlicht einen Wert aus einem anderen Zeitraum als der
-Rest. Die Rechnung steht in `packages/waage-mittelwert.h`.
+Rohwert und jeder Temperaturwert läuft in Summen-Globals (`fenster_*`,
+`temp_fenster_*`); beim Veröffentlichen werden daraus `mittel_rohwert`,
+`mittel_streuung` und `mittel_temperatur`. **Alle Entities rechnen gegen diese
+drei Globals, nie mehr direkt gegen `hx711_raw_counts`.** Wer das umgeht,
+veröffentlicht einen Wert aus einem anderen Zeitraum als der Rest. Die Rechnung
+steht in `packages/waage-mittelwert.h`.
 
 Daraus folgen drei Regeln:
 
 - **Ein neuer Sensor gehört ins Skript `messwerte_veroeffentlichen`** — dort
-  steht die Liste jetzt genau einmal (vorher dreimal, und regelmäßig blieb eine
+  steht die Liste genau einmal (vorher dreimal, und regelmäßig blieb eine
   Stelle zurück; der Sensor war dann nach einem Neustart dauerhaft leer).
 - **Rohwert und Temperatur müssen über dasselbe Fenster gemittelt werden.** Ein
   6-h-Mittel mit der Temperatur des Sendezeitpunkts zu korrigieren kostet
@@ -120,7 +150,7 @@ auf +70,8 kg. Daraus folgt:
   genauso falsch, nur unauffälliger. Die Entity behält ihren letzten Stand.
 - **Nur das Gewicht hängt am Fenster.** Rohwert, Streuung und Temperatur gehen
   weiter raus; ohne sie ließe sich nicht klären, warum das Gewicht fehlt.
-- **Der Taktgeber fragt `erste_messung_erfolgt`, nicht mehr
+- **Der Taktgeber fragt `erste_messung_erfolgt`, nicht
   `isnan(waage_gewicht.state)`.** Sonst käme er bei dauerhaft unplausiblen
   Werten nie aus dem Anlauf und schlösse jede Minute ein Messfenster ab.
 - **Die Untergrenze liegt bei −1 kg, nicht bei 0.** Nach einem Tara rauscht
@@ -154,69 +184,91 @@ Diagnose-Entity). Die Funktion nimmt reine Zahlen und kennt keine `id()`; nur
 deshalb ist sie mit g++ testbar.
 
 **Die HA-Seite liegt nicht im Repo.** Helfer, Automationen und das Dashboard
-`bienen-stockwaage` leben nur in Home Assistant und sind in
-`waage-eg-notes.md` dokumentiert. Änderungen dort über die ha-mcp-Tools, nicht
-über YAML-Dateien.
+`bienen-stockwaage-esp32` („Stockwaage", drei Ansichten) leben nur in Home
+Assistant. Änderungen dort über die ha-mcp-Tools, nicht über YAML-Dateien.
+Das ältere Dashboard `bienen-stockwaage` und die Automationen von `waage-eg`
+sind in `waage-eg-notes.md` dokumentiert — Archiv.
+
+## Deep Sleep
+
+Nur in `stockwaage.yaml`, nicht in der Basis. Hardwareschalter über
+`wakeup_pin` + `wakeup_pin_mode: KEEP_AWAKE`, Softwareschalter über einen
+`homeassistant`-binary_sensor auf `input_boolean.stockwaage_wachhalten`.
+
+**`trigger_on_initial_state: true` ist an einem `homeassistant`-Sensor
+Pflicht, sobald `on_state` beim Aufwachen wirken soll.** Der Codegenerator
+(`binary_sensor/__init__.py`) ruft `set_trigger_on_initial_state()` **immer**
+und setzt ohne den Schlüssel `false` — die C++-Vorgabe `true` ist wirkungslos.
+Der erste Wert aus HA kommt über `publish_initial_state()`, das vorher
+`invalidate_state()` ruft, also mit `had_state == false`. Ergebnis:
+
+> **`on_state` feuert erst ab dem zweiten Wert.**
+
+An einem dauerhaft laufenden Gerät fällt das nie auf. An einem
+Deep-Sleep-Gerät ist der erste Wert der einzige, auf den es ankommt. Gekostet
+hat das den 19.08.2026 — siehe `docs/sessionbericht-2026-08-19.md`.
+
+**`on_boot` darf sich nicht auf `api.connected` verlassen**, wenn es einen
+`homeassistant`-Wert braucht: der Zustand trifft erst danach ein. Richtig ist
+`wait_until` auf `id(<sensor>).has_state()`.
 
 ## Harte Regeln
 
-- **`restore_from_flash: true` nicht entfernen.** Ohne die Zeile landen alle
-  `restore_value`-Globals nur im RTC-RAM und sind bei jedem Stromausfall weg.
 - **Kein `calibrate_linear`.**
-- **GPIO16 (D0) bleibt frei** — einziger Deep-Sleep-Weckpin des ESP8266.
-  D4 (GPIO2) ist Boot-Strapping-Pin und für den geplanten MOSFET reserviert.
 - **`geraete_name` + `anzeige_name` + die `name:`-Felder bilden die entity_id in
-  HA.** An `waage-eg` nicht ändern, sonst legt HA neue Entities an und Verlauf,
-  Helfer, Automationen und Dashboard hängen an toten IDs.
+  HA.** An `stockwaage` nicht ändern, sonst legt HA neue Entities an und
+  Verlauf, Helfer und Dashboard hängen an toten IDs.
 - **Der Rohwert bleibt unkompensiert.** Er ist die Grundlage jeder künftigen
   Nachmessung des Temperaturkoeffizienten.
 - **Tara muss die Temperaturkorrektur mit abziehen.** Sonst wandert die Drift
   nach dem Tarieren wieder ins Gewicht zurück — fällt beim Ausprobieren nicht auf.
+- **Pins des ESP32 (siehe Kopf von `stockwaage.yaml`):** GPIO0/2/5/12/15 sind
+  Boot-Strapping, GPIO6–11 hängen am Flash, GPIO1/3 an UART0, GPIO34–39 sind
+  input-only ohne interne Pull-Widerstände.
+- **Repo und Add-on-Kopie auseinanderlaufen zu lassen ist der teuerste Fehler
+  dieses Projekts.** Er ist dreimal passiert. Vor jeder Fehlersuche am Gerät
+  erst `expected_config_hash` gegen `deployed_config_hash` prüfen
+  (`/devices` der Add-on-API, Port 6052 — Ingress gibt 403) und den geflashten
+  Inhalt über `devices/get_config` gegenlesen.
+
+**Nur noch historisch, für ESP8266-Geräte:** `restore_from_flash: true` war
+dort Pflicht, GPIO16 (D0) musste als Deep-Sleep-Weckpin frei bleiben, und ein
+neues `restore_value`-Global verschob den Speicherplatz aller nachfolgenden
+(`esp8266/preferences.cpp`: `current_flash_offset += total_words`, der
+Namens-Hash geht nur in die CRC) — das hat am 03.08. und 10.08.2026 die
+Kalibrierung gekostet. **Auf dem ESP32 gilt das nicht:** jedes Global bekommt
+einen eigenen NVS-Schlüssel (`1944399030 ^ name_hash`), Reihenfolge egal.
+Dafür löscht `erase_flash` bzw. „Clean Build Files" das NVS mit.
 
 ## Nach jedem Flash prüfen
 
 1. **Kalibrierfaktor** — Erwartungsbereich **−18.000 bis −21.000 counts/kg**
-   (der genaue Wert streut über Kalibrierungen hinweg). Exakt `3.500` heißt:
-   auf die Platzhalter zurückgefallen. Rund die Hälfte des Erwartungswerts
-   heißt: nur der Referenzpunkt wurde gesetzt, der Nullpunkt fehlt.
+   (zuletzt −20.780,66). Exakt `3.500` heißt: auf die Platzhalter
+   zurückgefallen. Rund die Hälfte des Erwartungswerts heißt: nur der
+   Referenzpunkt wurde gesetzt, der Nullpunkt fehlt.
 2. **„Kalibriert bei" darf nicht leer sein** — sonst fehlt der Bezugspunkt und
    die Temperaturkompensation schaltet sich stumm ab.
 
 Im Zweifel **beide** Kalibrierschritte fahren, nicht nur den Referenzpunkt.
-Auslöser ist typischerweise ein Flash, der ein neues `globals`-Element
-mitbringt; `restore_from_flash` schützt dagegen nicht.
-
-Genauer, aus `esphome/components/esp8266/preferences.cpp` (2026.6.5): Der
-Speicherplatz eines `restore_value`-Globals ergibt sich aus der **Reihenfolge**
-der `make_preference()`-Aufrufe, nicht aus seinem Namen. Ein neues Global mit
-`restore_value: yes` verschiebt deshalb alles, was danach kommt — die CRC
-schlägt fehl und die Werte fallen auf `initial_value` zurück. Ein Global mit
-`restore_value: no` fordert gar keinen Speicher an und ist damit unkritisch.
-Das erklärt beide Vorfälle und ist der Grund, warum neue Globals nach Möglichkeit
-`restore_value: no` bekommen sollten.
-
-**Am 12.08.2026 erstmals am Gerät bestätigt:** Ein Flash mit **drei** neuen
-Globals (`verworfene_gewichte`, `erste_messung_erfolgt`,
-`kalibrier_restminuten`), alle `restore_value: no`, hat die Kalibrierung
-unangetastet gelassen — Faktor vorher und nachher −20.755,91, „Kalibriert bei"
-22,2 °C. Ein Datenpunkt ist kein Beweis: **trotzdem nach jedem Flash prüfen.**
+Auf dem ESP32 ist ein neues Global kein Auslöser mehr, ein NVS-Erase schon.
 
 ## Wo was steht
 
 | Datei | Inhalt |
 |---|---|
-| [`waage-eg-claude-code-kontext.md`](waage-eg-claude-code-kontext.md) | **Zuerst lesen.** Vollständige Übergabe: Istwerte, alle Design-Entscheidungen mit Begründung, Werkzeug-Fallstricke, offene Punkte |
-| [`waage-eg-notes.md`](waage-eg-notes.md) | Ausführliche Begründungen und die komplette HA-Seite (Helfer, Automationen, Dashboard) |
-| [`README.md`](README.md) | Bedienung: Inbetriebnahme, Kalibrieren, Messintervall, Durchsichtmodus, Temperaturkompensation, Fehlersuche |
+| [`stockwaage.yaml`](stockwaage.yaml) | **Das Gerät.** Pins, Deep Sleep, ESP32-Abweichungen — durchgehend kommentiert |
 | [`docs/sessionbericht-*.md`](docs) | Chronologie. Wenn eine Entscheidung unbegründet wirkt, steht das Warum meist hier |
+| [`docs/deep-sleep-vorbereitung.md`](docs/deep-sleep-vorbereitung.md) | Abschnitt 9 ist der ESP32-Teil; 1–8 sind für den ESP8266 geschrieben |
+| [`README.md`](README.md) | Bedienung: Inbetriebnahme, Kalibrieren, Messintervall, Durchsichtmodus, Temperaturkompensation, Fehlersuche |
 | [`docs/waegezellen-verkabelung.md`](docs/waegezellen-verkabelung.md) | Abschnitt 0 ist der relevante (Halbbrücken-Ring), 1–6 sind Referenz für ein späteres Upgrade |
-| [`docs/deep-sleep-vorbereitung.md`](docs/deep-sleep-vorbereitung.md) | Ausgearbeitet, noch nicht umgesetzt |
+| [`waage-eg-claude-code-kontext.md`](waage-eg-claude-code-kontext.md) | **Archiv.** Übergabe für das abgebaute ESP8266-Gerät; Design-Begründungen gelten weiter, Istwerte nicht |
+| [`waage-eg-notes.md`](waage-eg-notes.md) | **Archiv.** Ausführliche Begründungen und die HA-Seite von `waage-eg` |
 
 ## Konventionen dieses Repos
 
 - **Kommentare erklären das Warum, nicht das Was**, und stehen direkt an der
-  Stelle. `waage-basis.yaml` ist bewusst kommentarlastig — das ist der Stil hier,
-  nicht Redundanz.
+  Stelle. `waage-basis.yaml` und `stockwaage.yaml` sind bewusst
+  kommentarlastig — das ist der Stil hier, nicht Redundanz.
 - **Pro Arbeitssitzung ein Sessionbericht** in `docs/`, mit Messwerten,
   Entscheidungen und den offenen Punkten am Ende.
 - **Ergebnisse belegen statt behaupten.** Zahlen kommen aus Messung oder
