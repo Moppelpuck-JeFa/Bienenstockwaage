@@ -648,16 +648,28 @@ esphome:
         # minuten_seit_messung >= Messintervall.
         - lambda: 'id(erste_messung_erfolgt) = true;'
 
+        # ERST EINSCHWINGEN LASSEN, DANN AUF HOME ASSISTANT WARTEN -
+        # und nicht umgekehrt.
+        #
+        # Die Reihenfolge war bis zum 19.08.2026 andersherum und damit
+        # falsch. Am Geraet gemessen: der WLAN- und API-Anlauf brauchte
+        # 37,3 s (Boot 19:44:27,7, erster Kontakt in HA 19:45:05,1). Der
+        # wait_until stand davor und gab nach 20 s auf - die Pruefung lief
+        # also JEDES MAL ins Leere, und die Einschwingzeit begann erst
+        # danach, wodurch erst bei 110 s statt bei 90 s gesendet wurde.
+        #
+        # So herum laufen Einschwingen und Verbindungsaufbau parallel. Nach
+        # den 90 s ist der Zustand laengst da, der wait_until kehrt sofort
+        # zurueck, und das Warten kostet nichts mehr.
+        - delay: ${einschwingzeit}
+
         # Auf den ZUSTAND warten, nicht auf die Verbindung. api.connected
         # ist zu frueh: der Wert des homeassistant-binary_sensors trifft
-        # erst ein Stueck nach dem Verbindungsaufbau ein, die Pruefung lief
-        # damit mal vor und mal nach ihm (am 18.08.2026 am Geraet
-        # beobachtet). has_state() ist wahr, sobald der Wert wirklich da
-        # ist - und impliziert die Verbindung.
+        # erst ein Stueck nach dem Verbindungsaufbau ein.
         #
         # Der timeout ist das Sicherheitsnetz: ohne ihn haenge das Geraet
         # bei WLAN-Ausfall bis run_duration und schliefe nie mit gefuelltem
-        # Messfenster ein. 20 s + einschwingzeit passen unter wachzeit.
+        # Messfenster ein. 90 s + 30 s passen unter die wachzeit von 200 s.
         #
         # Zusammen mit trigger_on_initial_state oben ist das doppelt
         # gemoppelt, und zwar mit Absicht: der on_state-Weg wirkt auch,
@@ -667,7 +679,7 @@ esphome:
         - wait_until:
             condition:
               lambda: 'return id(wachhalten_ha).has_state();'
-            timeout: 20s
+            timeout: 30s
         - if:
             condition:
               binary_sensor.is_on: wachhalten_ha
@@ -676,12 +688,11 @@ esphome:
               - logger.log: "Wachhalten ueber HA aktiv - Deep Sleep ausgesetzt"
             else:
               - logger.log: "Wachhalten aus oder Zustand nicht eingetroffen - regulaerer Ablauf"
-        # Einschwingen lassen, dann GENAU EINMAL veroeffentlichen.
-        # Bewusst nicht dem 60-s-Taktgeber der Basis ueberlassen: der feuert
-        # erst nach dem Ende des Weckfensters. Reihenfolge wie dort -
-        # erst das Messfenster abschliessen (setzt die mittel_*-Globals),
-        # dann senden.
-        - delay: ${einschwingzeit}
+
+        # Jetzt GENAU EINMAL veroeffentlichen. Bewusst nicht dem
+        # 60-s-Taktgeber der Basis ueberlassen. Reihenfolge wie dort - erst
+        # das Messfenster abschliessen (setzt die mittel_*-Globals), dann
+        # senden.
         - script.execute: messfenster_abschliessen
         - script.wait: messfenster_abschliessen
         - script.execute: messwerte_veroeffentlichen
