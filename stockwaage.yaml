@@ -705,6 +705,7 @@ esphome:
         # 60-s-Taktgeber der Basis ueberlassen. Reihenfolge wie dort - erst
         # das Messfenster abschliessen (setzt die mittel_*-Globals), dann
         # senden.
+        - logger.log: "AUSLOESER: on_boot im Weckfenster"
         - script.execute: messfenster_abschliessen
         - script.wait: messfenster_abschliessen
         - script.execute: messwerte_veroeffentlichen

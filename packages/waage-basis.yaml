@@ -897,6 +897,7 @@ button:
                      id(kalibrier_restminuten));
             id(kalibrier_restminuten) = 0;
           }
+      - logger.log: "AUSLOESER: Button Jetzt messen"
       - script.execute: messfenster_frisch
       - script.execute: messwerte_veroeffentlichen
       - lambda: |-
@@ -1123,6 +1124,7 @@ number:
           condition:
             lambda: 'return !std::isnan(id(hx711_raw_counts).state);'
           then:
+            - logger.log: "AUSLOESER: on_value der Number Messintervall"
             - script.execute: messfenster_frisch
             - script.execute: messwerte_veroeffentlichen
       - lambda: |-
@@ -1433,7 +1435,7 @@ interval:
             if (id(kalibrier_restminuten) > 0) {
               return;
             }
-            ESP_LOGI("waage", "Nachlauf beendet - erster Wert nach der Durchsicht");
+            ESP_LOGI("waage", "AUSLOESER: Durchsicht-Nachlauf beendet");
             id(minuten_seit_messung) = 0;
             // Momentanwert statt Fenster: waehrend Durchsicht und Nachlauf
             // wurde nichts gesammelt, und was noch vom Fenster VOR der
@@ -1464,8 +1466,7 @@ interval:
             if (id(kalibrier_restminuten) > 0) {
               return;
             }
-            ESP_LOGI("waage", "Kalibrier-Sperre abgelaufen - erster Wert "
-                              "danach");
+            ESP_LOGI("waage", "AUSLOESER: Kalibrier-Sperre abgelaufen");
             id(minuten_seit_messung) = 0;
             // Momentanwert statt Fenster: waehrend der Sperre wurde nichts
             // gesammelt, und was davor uebrig war, gehoert zur alten
@@ -1520,6 +1521,9 @@ interval:
           bool noch_kein_wert = !id(erste_messung_erfolgt);
 
           if (id(minuten_seit_messung) >= soll || noch_kein_wert) {
+            ESP_LOGI("waage", "AUSLOESER: Taktgeber (min_seit=%u soll=%u "
+                              "noch_kein_wert=%d)",
+                     id(minuten_seit_messung), soll, (int) noch_kein_wert);
             id(minuten_seit_messung) = 0;
             // Der planmäßige Fall - und der einzige, in dem ein volles
             // Messfenster zusammenkommt. Erst abschließen (das setzt die
