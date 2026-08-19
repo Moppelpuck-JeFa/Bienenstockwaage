@@ -614,6 +614,44 @@ web_server: !remove
 
 esphome:
   on_boot:
+    # --- 700: nach den Globals, vor dem Taktgeber -------------------------
+    # DEN ANLAUF DES TAKTGEBERS UEBERSPRINGEN, UND ZWAR FRUEH GENUG.
+    #
+    # Der interval-60s-Block der Basis prueft "erste_messung_erfolgt". Das
+    # Global ist restore_value: no, nach jedem Aufwachen aus dem Tiefschlaf
+    # also wieder false - der Taktgeber haelt sich fuer frisch gebootet und
+    # veroeffentlicht sofort, damit nach einem Neustart nicht ein ganzes
+    # Intervall lang nichts in HA steht. An einem dauerhaft laufenden Geraet
+    # ist das richtig, hier ist es falsch: der Wert ist dann noch nicht
+    # eingeschwungen (gemessen: 90 s, siehe einschwingzeit).
+    #
+    # WARUM PRIORITAET 700 UND NICHT -100:
+    # Der erste Tick eines interval-Blocks kommt NICHT nach 60 s, sondern
+    # nach einem Zufallsversatz von 0 bis 30 s - core/scheduler.cpp:
+    #
+    #   uint32_t max_offset = std::min(delay / 2, MAX_INTERVAL_DELAY);
+    #   // first execution happens immediately after a random smallish offset
+    #   item->set_next_execution(now_64 + offset);
+    #
+    # und core/component.cpp startet den Poller sogar VOR setup():
+    #
+    #   void PollingComponent::call_setup() {
+    #     this->start_poller();
+    #     this->setup();
+    #
+    # Weil ESPHome den Scheduler schon waehrend App.setup() laufen laesst,
+    # solange es auf langsame Komponenten (WLAN) wartet, kann dieser erste
+    # Tick VOR einem on_boot mit Prioritaet -100 kommen. Genau das war am
+    # 19.08.2026 der Fall - in der HA-Historie zwei Sendevorgaenge pro
+    # Weckfenster, einer davon schon bei 9,68 s Betriebszeit.
+    #
+    # 700 liegt zwischen den Globals (HARDWARE = 800, globals_component.h)
+    # und dem IntervalTrigger (DATA = 600, Vorgabe von Component). Damit ist
+    # das Global initialisiert und der Taktgeber noch nicht angelaufen.
+    - priority: 700
+      then:
+        - lambda: 'id(erste_messung_erfolgt) = true;'
+
     # LATE: WLAN und API sind zu diesem Zeitpunkt am Starten.
     - priority: -100
       then:
@@ -621,32 +659,6 @@ esphome:
         # schliefe ein Geraet, das die API nicht erreicht, mit dem
         # Rueckfallwert statt mit dem eingestellten Intervall.
         - script.execute: schlafdauer_koppeln
-
-        # DEN ANLAUF DES TAKTGEBERS UEBERSPRINGEN.
-        #
-        # Der interval-60s-Block der Basis prueft "erste_messung_erfolgt".
-        # Das Global ist restore_value: no, nach jedem Aufwachen aus dem
-        # Tiefschlaf also wieder false - der Taktgeber haelt sich damit fuer
-        # frisch gebootet und veroeffentlicht schon nach 60 s, damit nach
-        # einem Neustart nicht ein ganzes Intervall lang nichts in HA steht.
-        #
-        # An einem dauerhaft laufenden Geraet ist das richtig. Hier ist es
-        # falsch: 60 s liegen VOR den gemessenen 90 s Einschwingzeit. Am
-        # 19.08.2026 in der HA-Historie belegt - pro Weckfenster zwei
-        # Sendevorgaenge, bei 60,58 s und bei 94,64 s.
-        #
-        # Solange der BS250 abgeklemmt ist und der HX711 durchlaeuft, faellt
-        # das nicht auf. Mit Lastschalter ist der 60-s-Wert der halb
-        # eingeschwungene: gemessen ~-400.000 counts statt -718.300, also
-        # rund 15 kg daneben - und plausibel genug, um durch das
-        # Plausibilitaetsfenster zu gehen. Bei 72 h Messintervall waere das
-        # jede zweite Zahl der Messreihe.
-        #
-        # Das Senden im Weckfenster uebernimmt der Block weiter unten, nach
-        # der Einschwingzeit. Der Taktgeber bleibt fuer den Wachbetrieb
-        # zustaendig (Wachhalten-Schalter) und laeuft dort ueber
-        # minuten_seit_messung >= Messintervall.
-        - lambda: 'id(erste_messung_erfolgt) = true;'
 
         # ERST EINSCHWINGEN LASSEN, DANN AUF HOME ASSISTANT WARTEN -
         # und nicht umgekehrt.
