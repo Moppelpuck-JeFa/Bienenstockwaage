@@ -897,7 +897,6 @@ button:
                      id(kalibrier_restminuten));
             id(kalibrier_restminuten) = 0;
           }
-      - logger.log: "AUSLOESER: Button Jetzt messen"
       - script.execute: messfenster_frisch
       - script.execute: messwerte_veroeffentlichen
       - lambda: |-
@@ -1124,7 +1123,6 @@ number:
           condition:
             lambda: 'return !std::isnan(id(hx711_raw_counts).state);'
           then:
-            - logger.log: "AUSLOESER: on_value der Number Messintervall"
             - script.execute: messfenster_frisch
             - script.execute: messwerte_veroeffentlichen
       - lambda: |-
@@ -1306,28 +1304,6 @@ script:
   - id: messwerte_veroeffentlichen
     mode: single
     then:
-      # DIAGNOSE (19.08.2026, vorlaeufig). Am Deep-Sleep-Geraet kommt pro
-      # Weckfenster ein Sendevorgang zu viel: einer bei rund 60 s
-      # Betriebszeit, zusaetzlich zu dem aus on_boot bei 90 s. 60 s liegen
-      # VOR der gemessenen Einschwingzeit - solange der HX711 durchlaeuft
-      # ist das folgenlos, mit wieder angeschlossenem Lastschalter waere es
-      # ein halb eingeschwungener Wert in der Langzeitstatistik.
-      #
-      # Ausgeschlossen sind bisher, jeweils am Quelltext belegt: der
-      # Anlauf-Zweig des Taktgebers (erste_messung_erfolgt wird seit
-      # on_boot 700 vor dem IntervalTrigger gesetzt), das eigene Polling
-      # der Number (TemplateNumber::update kehrt ohne lambda sofort
-      # zurueck) und "Jetzt messen" (Button seit gestern nicht gedrueckt).
-      #
-      # Diese Zeile nennt den Ausloeser beim Namen. Nach der Klaerung
-      # wieder entfernen.
-      - lambda: |-
-          ESP_LOGI("waage",
-                   "veroeffentlichen: t=%.1fs min_seit=%u soll=%.0f "
-                   "erste=%d nachlauf=%d sperre=%d",
-                   millis() / 1000.0f, id(minuten_seit_messung),
-                   id(mess_intervall).state, (int) id(erste_messung_erfolgt),
-                   id(nachlauf_minuten), id(kalibrier_restminuten));
       - lambda: |-
           id(waage_gewicht).update();
           id(waage_uptime).update();
@@ -1381,6 +1357,32 @@ script:
     mode: restart
     then:
       - lambda: |-
+          // NUR AUFRAEUMEN, WENN WIRKLICH EINE DURCHSICHT LIEF.
+          //
+          // Der Schalter oben hat restore_mode: ALWAYS_OFF. ESPHome ruft
+          // dafuer beim Booten turn_off() auf, und das fuehrt das
+          // turn_off_action aus - also dieses Skript. Ohne die Abfrage
+          // startete damit JEDER Neustart einen 2-Minuten-Nachlauf, obwohl
+          // nie jemand den Taster gedrueckt hat.
+          //
+          // Am 19.08.2026 am Geraet nachgewiesen. Folgen im Deep-Sleep-
+          // Betrieb, wo jedes Aufwachen ein Neustart ist:
+          //   - ein zusaetzlicher Sendevorgang bei rund 60 s Betriebszeit,
+          //     und zwar ein MOMENTANWERT (der Nachlauf schickt bewusst
+          //     keinen Fenstermittelwert) - vor dem Ende der gemessenen
+          //     90 s Einschwingzeit
+          //   - waehrend des Nachlaufs sammelt das Messfenster nicht. Der
+          //     eigentliche Messwert bei 90 s stand deshalb auf 39 statt
+          //     rund 120 Rohwerten.
+          //
+          // Gefragt wird der Schalterzustand, nicht durchsicht_restminuten:
+          // beim Ablauf der Zeit hat der Taktgeber den Zaehler bereits auf
+          // 0 gesetzt, bevor er hierher kommt.
+          if (!id(durchsichtmodus).state) {
+            id(durchsicht_restminuten) = 0;
+            id(durchsicht_led).turn_off();
+            return;
+          }
           id(durchsicht_restminuten) = 0;
           // Nachlauf, damit der erste Wert nach der Durchsicht sauber ist
           id(nachlauf_minuten) = 2;
@@ -1435,7 +1437,7 @@ interval:
             if (id(kalibrier_restminuten) > 0) {
               return;
             }
-            ESP_LOGI("waage", "AUSLOESER: Durchsicht-Nachlauf beendet");
+            ESP_LOGI("waage", "Nachlauf beendet - erster Wert nach der Durchsicht");
             id(minuten_seit_messung) = 0;
             // Momentanwert statt Fenster: waehrend Durchsicht und Nachlauf
             // wurde nichts gesammelt, und was noch vom Fenster VOR der
@@ -1466,7 +1468,8 @@ interval:
             if (id(kalibrier_restminuten) > 0) {
               return;
             }
-            ESP_LOGI("waage", "AUSLOESER: Kalibrier-Sperre abgelaufen");
+            ESP_LOGI("waage", "Kalibrier-Sperre abgelaufen - erster Wert "
+                              "danach");
             id(minuten_seit_messung) = 0;
             // Momentanwert statt Fenster: waehrend der Sperre wurde nichts
             // gesammelt, und was davor uebrig war, gehoert zur alten
@@ -1521,9 +1524,6 @@ interval:
           bool noch_kein_wert = !id(erste_messung_erfolgt);
 
           if (id(minuten_seit_messung) >= soll || noch_kein_wert) {
-            ESP_LOGI("waage", "AUSLOESER: Taktgeber (min_seit=%u soll=%u "
-                              "noch_kein_wert=%d)",
-                     id(minuten_seit_messung), soll, (int) noch_kein_wert);
             id(minuten_seit_messung) = 0;
             // Der planmäßige Fall - und der einzige, in dem ein volles
             // Messfenster zusammenkommt. Erst abschließen (das setzt die
