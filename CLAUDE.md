@@ -16,11 +16,12 @@ Sleep. Geflasht wird `stockwaage.yaml`, die Logik kommt aus
 `packages/waage-basis.yaml`.
 
 **`waage-eg` (ESP8266 D1 Mini) existiert nicht mehr** (Stand 19.08.2026 — weder
-im ESPHome Device Builder noch als Entities in HA). Die Datei `waage-eg.yaml`
-und die beiden nie gebauten `waage-stock2/3.yaml` liegen noch im Repo, ebenso
+im ESPHome Device Builder noch als Entities in HA). Seine Stock-Datei und die
+beiden nie gebauten `waage-stock2/3.yaml` sind entfernt. Geblieben sind
 `waage-eg-notes.md` und `waage-eg-claude-code-kontext.md`. **Das ist Archiv, kein
 laufender Betrieb.** Alles darin, was im Präsens von einem produktiven Gerät oder
-von einer laufenden Messreihe spricht, ist überholt.
+von einer laufenden Messreihe spricht, ist überholt — auch die Dateibäume, die
+noch drei Stock-Dateien zeigen.
 
 Zwei Dinge, die früher fast jede Änderung bestimmt haben und **jetzt nicht mehr
 gelten**:

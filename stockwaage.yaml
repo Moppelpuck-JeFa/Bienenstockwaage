@@ -1,50 +1,48 @@
 # =====================================================================
-# Stock "Stockwaage" - ESP32 NodeMCU
+# Stockwaage - ESP32 NodeMCU
 # =====================================================================
-# Portierung von waage-eg auf ein ESP32 DOIT DevKit V1
-# (NodeMCU-32S-kompatibel), plus Deep Sleep mit BS250-Lastschalter.
-# Hintergrund und Messvorschriften: docs/deep-sleep-vorbereitung.md,
-# dort Abschnitt 9 fuer alles ESP32-Spezifische - die Abschnitte 1-8
-# sind fuer den ESP8266 geschrieben und stimmen hier teils nicht.
+# DAS Geraet. Seit dem 19.08.2026 das einzige: der ESP8266-Vorgaenger
+# waage-eg ist abgebaut, seine Stock-Dateien sind aus dem Repo entfernt.
+# Was in waage-eg-notes.md und waage-eg-claude-code-kontext.md steht, ist
+# Archiv - die Begruendungen gelten weiter, die Istwerte nicht.
 #
-# Die gesamte Messlogik kommt UNVERAENDERT aus packages/waage-basis.yaml -
-# derselben Datei, aus der auch waage-eg geflasht wird. Es gibt bewusst
-# KEINE ESP32-Kopie der Basis: eine zweite Kopie von 1.500 Zeilen Logik
-# wuerde beim naechsten Feinschliff auseinanderlaufen, und zwar still.
-# Stattdessen werden hier nur die Stellen ueberschrieben, an denen der
-# ESP32 sich vom ESP8266 unterscheidet, und der Deep-Sleep-Teil ergaenzt
-# (beides unten einzeln kommentiert).
+# ESP32 DOIT DevKit V1 (NodeMCU-32S-kompatibel), Deep Sleep mit
+# BS250-Lastschalter. Hintergrund und Messvorschriften:
+# docs/deep-sleep-vorbereitung.md, dort Abschnitt 9 fuer alles
+# ESP32-Spezifische - die Abschnitte 1-8 sind fuer den ESP8266
+# geschrieben und stimmen hier teils nicht.
 #
-# waage-eg.yaml ist dabei NICHT angefasst worden, packages/waage-basis.yaml
-# ebenfalls nicht. Diese Datei kann also nichts am produktiven Geraet
-# aendern - der naechste Flash von waage-eg liefert Byte fuer Byte
-# dieselbe aufgeloeste Konfiguration wie vorher.
+# Die gesamte Messlogik kommt UNVERAENDERT aus packages/waage-basis.yaml.
+# Die Aufteilung bleibt, obwohl es nur noch einen Abnehmer gibt: Das
+# ESPHome Device Builder Add-on listet ausschliesslich YAML direkt in
+# /config/esphome/ als flashbare Geraete - laege die Basis dort, taeuchte
+# sie als Pseudo-Geraet auf.
+#
+# Die Basis traegt noch einen esp8266:-Block, den diese Datei per !remove
+# entfernt (unten Punkt 1). Das war noetig, solange beide Geraete
+# dieselbe Basis teilten; jetzt ist es Ballast. Auflösen ist zulaessig,
+# aber eine bewusste Aufraeumaktion - kein Nebenbei-Edit.
 #
 # ---------------------------------------------------------------------
-# ACHTUNG - eigene Entity-IDs
+# ACHTUNG - die Entity-IDs sind jetzt in Benutzung
 # ---------------------------------------------------------------------
-# geraete_name/anzeige_name sind bewusst NEU und duerfen nicht auf
-# "waage-eg"/"Waage eG" gesetzt werden. Die Entities heissen dadurch
-# sensor.stockwaage_gewicht usw. und liegen neben denen des produktiven
-# Geraets. Beide duerfen gleichzeitig laufen; die Helfer, Automationen
-# und das Dashboard von waage-eg haengen weiter an dessen Entities und
-# sehen dieses Geraet gar nicht.
+# geraete_name/anzeige_name bilden zusammen mit den name:-Feldern die
+# entity_id in HA (sensor.stockwaage_gewicht usw.). An ihnen haengen
+# Dashboard, Helfer und die laufende Messreihe. Ein Umbenennen legt neue
+# Entities an und laesst alles das an toten IDs haengen - also nicht
+# aendern.
 #
 # DER NAME IST BEWUSST OHNE "esp32" UND OHNE "test". Beides altert
 # schlecht: das Board wird irgendwann getauscht, und aus einem Testaufbau
-# wird ein produktiver. Ein spaeteres Umbenennen kostet dann die
-# HA-Historie, weil geraete_name+anzeige_name die entity_id bilden -
-# deshalb steht der Name JETZT fest, vor dem ersten Flash.
+# wird ein produktiver.
 #
-# IN HOME ASSISTANT HAENGT BEREITS ETWAS DARAN (17.08.2026 angelegt,
-# bevor das Geraet existierte - die Entities sind daher noch
-# "unavailable" und werden von selbst gruen, sobald geflasht und
-# eingebunden ist):
+# IN HOME ASSISTANT HAENGT DARAN:
 #   - Dashboard "Stockwaage" (/bienen-stockwaage-esp32), drei Ansichten
 #   - sensor.stockwaage_tagesbilanz          (statistics, change, 24 h)
 #   - sensor.stockwaage_gewichtsanderung     (derivative, 6 h  -> kg/d)
 #   - sensor.stockwaage_gewichtsverlust_kurz (derivative, 20 min -> kg/h)
-# Wer geraete_name hier aendert, muss die vier Stellen mit aendern.
+#   - input_boolean.stockwaage_wachhalten    (Softwareschalter Deep Sleep)
+# Wer geraete_name hier aendert, muss die fuenf Stellen mit aendern.
 #
 # ---------------------------------------------------------------------
 # Nach dem ersten Flash: KALIBRIEREN, beide Schritte
