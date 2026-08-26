@@ -389,7 +389,7 @@ Weckfähige Pins des klassischen ESP32, aus
 `components/deep_sleep/__init__.py` (2026.7.4): **0, 2, 4, 12, 13, 14, 15, 25,
 26, 27, 32–39**. GPIO16/17 (HX711) und GPIO18 (LED) sind **nicht** dabei.
 
-### 9.2 Der BS250 als Lastschalter
+### 9.2 Der IRLML6402 als Lastschalter
 
 P-Kanal-MOSFET als **High-Side**-Schalter: Source an 3V3, Drain an VCC des
 HX711-Moduls, Gate an **GPIO25**. Gate LOW = leitend, deshalb `inverted: true`
@@ -399,20 +399,59 @@ am Schalter.
 GPIOs hochohmig; ohne diesen Widerstand schwebt das Gate und der MOSFET steht
 undefiniert, im schlimmsten Fall halb leitend. Der Pull-up ist der
 Ausschalt-Pfad im Schlaf — es gibt keine Aktion, die das erledigt, und es
-braucht auch keine. 220 Ω in Reihe ins Gate begrenzen den Umladestrom.
+braucht auch keine. Bei einer Schwellspannung von typisch nur −0,55 V ist er
+hier wichtiger als beim Vorgänger, nicht unwichtiger. 220 Ω in Reihe ins Gate
+begrenzen den Umladestrom.
 
-> **Vorbehalt, vor dem Batteriebetrieb zu messen:** Der BS250 ist **kein
-> Logic-Level-Typ.** Sein Rds(on) ist bei **Vgs = −10 V** spezifiziert, die
-> Schwellspannung liegt je nach Exemplar zwischen etwa −1 V und −3,5 V. Am
-> 3,3-V-Rail stehen aber nur −3,3 V zur Verfügung — ein Exemplar am oberen Ende
-> der Streuung leitet damit kaum. Bei den ~6 mA Laststrom fällt das lange nicht
-> auf, kann aber die Versorgungsspannung des HX711 drücken und damit die
-> Messung verstimmen.
->
-> **Gegenprobe mit dem Multimeter:** Spannung zwischen Source und Drain im
-> eingeschalteten Zustand messen. Mehr als ~50 mV heißt, der MOSFET leitet
-> schlecht. Dann entweder ein Logic-Level-Typ (IRLML6402, DMG3415, AO3401) oder
-> das Gate über eine kleine NPN-Stufe aus 5 V ansteuern.
+**Warum nicht mehr der BS250** (verbaut 18.08.2026, ersetzt 26.08.2026):
+
+Der BS250 ist **kein Logic-Level-Typ**. Seine Schwellspannung ist mit **−1 bis
+−3,5 V** spezifiziert, sein Rds(on) bei −10 V. Am 3,3-V-Rail stehen aber nur
+−3,3 V zur Verfügung — ein Exemplar am oberen Ende der Streuung ist damit
+schlicht **aus**. Das ist kein Streuungsrisiko, das man ausmisst, sondern ein
+Betrieb außerhalb der Spezifikation.
+
+| | BS250 | IRLML6402 |
+|---|---|---|
+| V_GS(th) max | **−3,5 V** | **−1,2 V** (typ. −0,55 V) |
+| R_DS(on) | 14 Ω @ V_GS = −10 V | 80 mΩ @ V_GS = −2,5 V |
+| V_DS / I_D | −60 V / −230 mA | −20 V / −3,7 A |
+| Gehäuse | TO-92 | SOT-23 |
+
+Bei 6 mA Laststrom ist der R_DS(on) in beiden Fällen bedeutungslos (0,5 mV
+Abfall beim IRLML6402). **Das einzige Kriterium ist die Schwellspannung.**
+−20 V V_DS reichen für 3,3 V mit großem Abstand.
+
+**Beinbelegung vor dem Löten messen.** Sie ließ sich hier nicht aus einer
+Primärquelle belegen — die Datenblattseiten von Infineon, RS und LCSC sind
+durch die Egress-Policy gesperrt, und die erreichbaren Sekundärquellen
+widersprechen der JEDEC-üblichen SOT-23-MOSFET-Belegung. Vertauscht man Source
+und Drain, leitet die Body-Diode dauerhaft und der Schalter schaltet nie ab —
+mit einem Fehlerbild, das wie ein defekter MOSFET aussieht. Diodenmessung: das
+Bein mit der Body-Diode gegen ein anderes ist Drain (Durchlass in Richtung
+Source), das dritte ist Gate (in alle Richtungen hochohmig).
+
+#### Die richtige Gegenprobe nach dem Löten
+
+**Nicht die Warnung beim Booten heranziehen.** `HX711Sensor::setup()` ruft
+`read_sensor_()` einmal auf, bevor irgendetwas bereit ist — die Meldung
+`HX711 DOUT pin not high after reading (data 0x0)!` kommt deshalb bei **jedem**
+Start, unabhängig davon, ob der Lastschalter funktioniert. Am 18.08.2026 wurde
+sie als Abschaltbeweis gelesen; das war falsch.
+
+Richtig ist der Vergleich der **laufenden** Werte im Log, über
+`switch.<gerät>_hx711_versorgung` geschaltet:
+
+| | Versorgung an | Versorgung aus |
+|---|---|---|
+| `Got value`-Zeilen je 10 s | ~63 | **0** |
+| HX711-Warnungen je 10 s | 0 | **~64** |
+
+**Am 26.08.2026 am Gerät so gemessen**, mit dem IRLML6402 und in beide
+Richtungen — nach dem Wiedereinschalten kamen sofort wieder 63 Zeilen und
+0 Warnungen. Der Rohwert lag dabei bei −736.245 gegenüber −737.390 vor dem
+Abschalten, also rund 1.150 counts (≈ 55 g) daneben; nach 25 s Abschaltzeit ist
+das erwartbar und genau der Grund für die Einschwingzeit aus 9.7.
 
 ### 9.3 Warum der SCK-Pull-up jetzt schädlich wäre
 
@@ -541,8 +580,10 @@ zwischen den Messungen einer Stunde) schneller einschwingt als ein kalter.
 
 1. **Ruhestrom messen** — unverändert Punkt 8.1. Erst diese Zahl sagt, ob aus
    Variante C (~17 Tage) wirklich Variante D (~200 Tage) wird.
-2. **Spannungsabfall über den BS250 messen** — siehe 9.2. Entscheidet, ob der
-   Typ taugt.
+2. ~~**Spannungsabfall über den BS250 messen.**~~ **Hinfällig seit dem
+   26.08.2026:** Der BS250 ist durch einen **IRLML6402** ersetzt, siehe 9.2.
+   Er ist logic-level, das Schalten ist am Gerät in beide Richtungen belegt.
+   Ein Spannungsabfall ist bei 80 mΩ und 6 mA kein Thema mehr.
 3. ~~**Einschwingzeit des HX711 nach Power-Down ausmessen.**~~ **Erledigt am
    18.08.2026, siehe 9.7** — rund 90 s, deutlich mehr als die geschätzten 12 s.
    Damit steht die Wirtschaftlichkeit des ganzen Power-Downs bei kurzen

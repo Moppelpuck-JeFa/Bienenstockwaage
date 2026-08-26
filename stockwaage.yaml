@@ -7,7 +7,7 @@
 # Archiv - die Begruendungen gelten weiter, die Istwerte nicht.
 #
 # ESP32 DOIT DevKit V1 (NodeMCU-32S-kompatibel), Deep Sleep mit
-# BS250-Lastschalter. Hintergrund und Messvorschriften:
+# Lastschalter (IRLML6402). Hintergrund und Messvorschriften:
 # docs/deep-sleep-vorbereitung.md, dort Abschnitt 9 fuer alles
 # ESP32-Spezifische - die Abschnitte 1-8 sind fuer den ESP8266
 # geschrieben und stimmen hier teils nicht.
@@ -124,10 +124,16 @@ substitutions:
   pin_taster: GPIO34
   pin_led: GPIO18
 
-  # --- Deep Sleep (BS250-Lastschalter) ---
-  # Gate des BS250. Ein P-Kanal-MOSFET schaltet HIGH-SIDE: Source an 3V3,
+  # --- Deep Sleep (Lastschalter IRLML6402) ---
+  # Gate des MOSFETs. P-Kanal, HIGH-SIDE geschaltet: Source an 3V3,
   # Drain an VCC des HX711-Moduls, Gate hierher. Gate LOW = durchgeschaltet,
   # deshalb "inverted: true" am switch weiter unten.
+  #
+  # Bis zum 26.08.2026 sass hier ein BS250. Der ist KEIN Logic-Level-Typ
+  # (V_GS(th) bis -3,5 V) und bei -3,3 V Ansteuerung nicht zugelassen - ein
+  # Exemplar am oberen Rand der Streuung ist schlicht aus. Der IRLML6402
+  # kommt mit -1,2 V max aus, hat also rund 2 V Reserve. Details und die
+  # Gegenprobe: docs/deep-sleep-vorbereitung.md, Abschnitt 9.2.
   #
   # ZWINGEND DAZU: 100 kOhm von Gate nach 3V3 (also Gate->Source).
   # Im Deep Sleep sind die GPIOs hochohmig - ohne diesen Widerstand schwebt
@@ -551,7 +557,7 @@ number:
     on_value:
       - script.execute: schlafdauer_koppeln
 
-# --- Lastschalter fuer den HX711 (BS250) ---
+# --- Lastschalter fuer den HX711 (IRLML6402) ---
 # Der eigentliche Zweck der Uebung. Laut docs/deep-sleep-vorbereitung.md
 # ziehen HX711 und Waegezellenbruecke zusammen ~5,8 mA DAUERHAFT - der
 # schlafende ESP32 liegt bei ~0,01 mA. Ohne diesen Schalter bringt Deep
