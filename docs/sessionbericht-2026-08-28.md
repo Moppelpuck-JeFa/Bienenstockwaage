@@ -57,7 +57,7 @@ Die Regel dahinter, und sie gilt für jeden weiteren Boardwechsel:
 
 Warum die mDNS-Ankündigung trotzdem `bienenwaage` lautete, ließ sich in dieser
 Sitzung nicht abschließend klären; der Zugriff auf die Add-on-Dateien fehlt
-(siehe Punkt 5). Für das Ergebnis ist es ohne Belang: maßgeblich ist der Name,
+(siehe Punkt 7). Für das Ergebnis ist es ohne Belang: maßgeblich ist der Name,
 den das Gerät über die API meldet, und der war `stockwaage`.
 
 **Nebenbefund:** Die Bestätigung über die Oberfläche war vorher an der
@@ -136,43 +136,88 @@ suchen, ändern, danach auf Reste prüfen.
 - `input_boolean.stockwaage_wachhalten` liefert 404, ist also wirklich weg.
 - Alle neuen IDs sind in der State Machine mit korrekten Anzeigenamen.
 
-Verbleibende Nennungen von „Stockwaage" gibt es noch in den **Config-Entry-Titeln**
-der drei Helfer (Einstellungen → Helfer). Das ist kosmetisch: Entity-IDs und
-Anzeigenamen sind umgestellt. Options-Flows nehmen keinen neuen Titel an,
-Umbenennen ginge dort nur über Löschen und Neuanlegen — und das kostete die
-Historie. Bewusst so gelassen.
+Der Titel des ESPHome-Config-Entrys wurde nachgezogen (`config_entries/update`),
+er lautet in der Integrationsliste jetzt ebenfalls „Bienenwaage".
 
-## 5. Zustand des neuen Geräts
+Verbleibende Nennungen von „Stockwaage" gibt es damit nur noch in den
+**Config-Entry-Titeln der drei Helfer** (Einstellungen → Helfer). Das ist
+kosmetisch: Entity-IDs und Anzeigenamen sind umgestellt. Options-Flows nehmen
+keinen neuen Titel an, und für Helfer gibt es kein Gegenstück zu
+`config_entries/update` — Umbenennen ginge dort nur über Löschen und
+Neuanlegen, und das kostete die Historie. Bewusst so gelassen.
 
-Verbunden seit 21:11:59. **Die Kalibrierung steht auf den Platzhaltern:**
+## 5. Die IP-Verwirrung, und was wirklich dahinterstand
 
-| Größe | Wert | Bewertung |
-|---|---|---|
-| Kalibrierfaktor | `3500.0` | Platzhalter — erwartet werden −18.000 bis −21.000 |
-| Kalibriert bei | leer | Temperaturkompensation ist damit **stumm aus** |
-| Gewicht | `unknown` | Folge der fehlenden Kalibrierung |
-| Rohwert | −717.422,69 | plausibel, HX711 liefert |
-| WLAN-Signal | −76 dBm | schwächer als am alten Board (−67) |
+Nach dem Umbau meldete HA weiter Verbindungsfehler, und im Log stand
+`192.168.1.171` — die Adresse des alten Boards. Der naheliegende Schluss war
+ein veralteter Host im Config-Entry. Er war falsch.
 
-Bei einem neuen Board mit frischem NVS ist das erwartbar. **Beide
-Kalibrierschritte fahren, nicht nur den Referenzpunkt** — der Faktor des alten
-Boards (−20.780,66 bei 22,5 °C, kalibriert mit 33,62 kg) gilt hier nicht.
+**Der Host stand längst auf `192.168.1.115`.** Belegt zweifach: die aktuelle
+Reconnect-Zeile lautete `Can't connect to ESPHome API for stockwaage @
+192.168.1.115`, und das Reconfigure-Formular kam mit `default:
+"192.168.1.115"` zurück, also mit dem gespeicherten Wert.
 
-Die beiden Ableitungen stehen bis dahin auf `unavailable`, weil ihre Quelle
-`unknown` ist. Das löst sich mit der Kalibrierung von selbst.
+> **HA fasst wiederkehrende Logmeldungen zusammen und zeigt sie ab dem ersten
+> Auftreten.** Der Eintrag hatte `count: 15` und reichte bis vor den
+> Boardwechsel zurück. Die `.171`-Zeilen darin waren Altlasten der Anzeige,
+> keine laufenden Versuche. Wer nur auf die erste Zeile schaut, jagt ein
+> Gespenst — der Zeitstempel der Gruppe gehört zum *ältesten* Vorkommen.
 
-`binary_sensor.bienenwaage_wachhalten_schalter` steht auf **an** — der
-Kippschalter an der Hardware ist umgelegt, das Gerät geht nicht in den
-Tiefschlaf. Praktisch fürs Kalibrieren, aber danach umlegen, sonst läuft der
-Akku leer.
+Die tatsächliche Ursache war banal: **das Gerät schlief.** Der Fehler lautete
+`Errno 113 — No route to host`, also eine fehlgeschlagene ARP-Auflösung, nicht
+ein abgewiesener Port. Der FRITZ!Box-Eintrag stand dabei weiter auf „home" —
+ein gecachter Lease, der über den Tiefschlaf hinweg stehen bleibt und als
+Erreichbarkeitsnachweis nichts taugt.
 
-## 6. Offene Punkte
+Sobald der Kippschalter am Gehäuse auf an stand, war die Verbindung um
+21:59:27 da. Ein Druck auf „Jetzt messen" brachte sofort Werte.
+
+Eine zwischenzeitliche Meldung `Invalid encryption key` erwies sich als
+Nebenprodukt der parallelen Flow-Versuche und nicht als echtes Problem — mit
+dem gespeicherten Schlüssel verbindet sich das Gerät einwandfrei.
+
+## 6. Endstand nach der Kalibrierung
+
+| Größe | Wert |
+|---|---|
+| Verbindung | an, seit 21:59:27 |
+| Gewicht | 35,5 kg |
+| Rohwert | −514.704,75 |
+| Temperatur | 20,7 °C |
+| Kalibrierfaktor | **−14.081,15** |
+| Kalibriert bei | 20,9 °C |
+| Messintervall | 60 min |
+| WLAN-Signal | −76 dBm |
+| Wachhalten (Schalter) | an |
+
+„Kalibriert bei" ist gesetzt, die Temperaturkompensation läuft also. Der
+Platzhalter 3.500 ist weg.
+
+**Der Kalibrierfaktor liegt allerdings außerhalb des dokumentierten
+Erwartungsbereichs** von −18.000 bis −21.000 counts/kg; das alte Board stand
+zuletzt bei −20.780,66. Die Signatur „nur der Referenzpunkt gesetzt" ist es
+nicht — die läge bei rund der Hälfte, also etwa −10.000. Denkbar sind eine
+geänderte HX711-Verstärkung, eine andere Verschraubung der Mechanik oder ein
+ungenauer Kalibriervorgang. **Mit einem bekannten Gewicht gegenprüfen:** legt
+man ein Prüfgewicht auf, muss die Anzeige um dessen Masse steigen. Weicht sie
+systematisch ab, beide Kalibrierschritte wiederholen.
+
+## 7. Offene Punkte
 
 - **`bienenwaage.yaml` ist nicht im Repo.** Sie konnte auch nicht geholt
   werden: der MCP-Token hat keinen Supervisor-Zugriff (`/addons` →
   *Unauthorized*), damit sind weder die Add-on-Dateiliste noch die
   WebSocket-Schnittstelle des Device Builders erreichbar. Von Hand einchecken,
   sonst beschreibt das Repo dauerhaft ein Gerät, das es nicht mehr gibt.
+- **Kalibrierfaktor gegenprüfen**, siehe Punkt 6.
+- **Feste IP vergeben.** Für MAC `20:50:0D:CA:B2:BC` eine Lease-Reservierung
+  in der FRITZ!Box setzen. Das alte Board hatte `.171`, dieses hat `.115` —
+  ohne Reservierung wandert die Adresse beim nächsten Mal wieder.
+  `bienenwaage.local` ist keine Alternative: die mDNS-Auflösung ist in dieser
+  Installation nachweislich unzuverlässig, daran scheiterte schon die erste
+  Adoption (`Timeout while resolving IP address`).
+- **Kippschalter wieder umlegen**, sonst gibt es keinen Tiefschlaf und der
+  Akku läuft leer.
 - **Die Umbenennung lebt nur in der HA-Registry.** Die YAML sagt weiterhin
   `stockwaage`. Das ist stabil und überlebt Flashes, aber wer nur die YAML
   liest, findet den Namen nicht wieder. Beim nächsten Anfassen der Datei einen
@@ -182,4 +227,5 @@ Akku leer.
 - Die Pin-Belegung in `waage-eg.yaml` ist D1-Mini-Notation und passt nicht zu
   einem ESP32. Der Durchsicht-Taster liegt laut Dashboard-Text auf GPIO34 mit
   externem 10-kΩ-Pull-up.
-- Das WLAN-Signal am neuen Standort im Auge behalten.
+- **WLAN-Signal beobachten:** −76 dBm gegenüber −67 dBm am alten Board. Laut
+  eigener Dashboard-Doku wird es unter −80 dBm wackelig.
