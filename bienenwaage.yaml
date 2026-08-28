@@ -1,0 +1,784 @@
+# =====================================================================
+# Stockwaage - ESP32 NodeMCU
+# =====================================================================
+# DAS Geraet. Seit dem 19.08.2026 das einzige: der ESP8266-Vorgaenger
+# waage-eg ist abgebaut, seine Stock-Dateien sind aus dem Repo entfernt.
+# Was in waage-eg-notes.md und waage-eg-claude-code-kontext.md steht, ist
+# Archiv - die Begruendungen gelten weiter, die Istwerte nicht.
+#
+# ESP32 DOIT DevKit V1 (NodeMCU-32S-kompatibel), Deep Sleep mit
+# BS250-Lastschalter. Hintergrund und Messvorschriften:
+# docs/deep-sleep-vorbereitung.md, dort Abschnitt 9 fuer alles
+# ESP32-Spezifische - die Abschnitte 1-8 sind fuer den ESP8266
+# geschrieben und stimmen hier teils nicht.
+#
+# Die gesamte Messlogik kommt UNVERAENDERT aus packages/waage-basis.yaml.
+# Die Aufteilung bleibt, obwohl es nur noch einen Abnehmer gibt: Das
+# ESPHome Device Builder Add-on listet ausschliesslich YAML direkt in
+# /config/esphome/ als flashbare Geraete - laege die Basis dort, tauchte
+# sie als Pseudo-Geraet auf.
+#
+# Die Basis traegt noch einen esp8266:-Block, den diese Datei per !remove
+# entfernt (unten Punkt 1). Das war noetig, solange beide Geraete
+# dieselbe Basis teilten; jetzt ist es Ballast. Aufloesen ist zulaessig,
+# aber eine bewusste Aufraeumaktion - kein Nebenbei-Edit.
+#
+# ---------------------------------------------------------------------
+# ACHTUNG - Geraetename und Entity-IDs laufen seit dem 28.08.2026
+# auseinander, und zwar mit Absicht
+# ---------------------------------------------------------------------
+# geraete_name/anzeige_name stehen weiterhin auf "stockwaage" bzw.
+# "Stockwaage". Die Entities in HA heissen aber bienenwaage_*.
+#
+# Der Grund: Am 28.08.2026 wurde das Board getauscht. Weil ESPHome-
+# Config-Entries am GERAETENAMEN haengen und nicht an der Hardware, hat
+# HA dem neuen Board die bestehende Identitaet zugewiesen - dieselben
+# Entities, dieselbe Messreihe, nur neue MAC und IP. Es entstanden also
+# KEINE neuen Entities.
+#
+# Umbenannt wurde danach ausschliesslich in der HA-Entity-Registry, nicht
+# hier. Das war die einzige Variante, die die Historie samt
+# Langzeitstatistik erhaelt; ein geaenderter geraete_name haette neue
+# Entities angelegt und alles Bisherige an toten IDs haengen lassen.
+#
+# DARAUS FOLGT: geraete_name hier NICHT auf "bienenwaage" ziehen, auch
+# wenn es verlockend aussieht. Registry-Namen gewinnen gegen die von der
+# Integration vorgeschlagenen, ein Flash macht die Umbenennung also nicht
+# rueckgaengig. Wer geraete_name trotzdem aendert, loest genau den
+# Schaden aus, den die Umbenennung vermieden hat.
+#
+# DER NAME IST BEWUSST OHNE "esp32" UND OHNE "test". Beides altert
+# schlecht: das Board wird irgendwann getauscht, und aus einem Testaufbau
+# wird ein produktiver.
+#
+# IN HOME ASSISTANT HAENGT DARAN (Stand nach der Umbenennung):
+#   - Dashboard "Bienenwaage" (/bienen-stockwaage-esp32), drei Ansichten
+#     Die url_path traegt noch den alten Namen - sie laesst sich nicht
+#     aendern, ohne Sidebar-Eintrag und Lesezeichen zu verlieren.
+#   - sensor.bienenwaage_tagesbilanz          (statistics, change, 24 h)
+#   - sensor.bienenwaage_gewichtsanderung     (derivative, 6 h  -> kg/d)
+#   - sensor.bienenwaage_gewichtsverlust_kurz (derivative, 20 min -> kg/h)
+#   - input_boolean.bienenwaage_wachhalten    (Softwareschalter Deep Sleep)
+#     ACHTUNG: Diese ID steht weiter unten im homeassistant-binary_sensor
+#     und ist die einzige Stelle, an der die FIRMWARE eine HA-Entity
+#     referenziert. Wird der Helfer in HA umbenannt, faellt das Wachhalten
+#     ueber HA stumm aus - der Sensor bekommt schlicht nie einen Zustand.
+#     Am 28.08.2026 genau so passiert.
+#
+# ---------------------------------------------------------------------
+# Nach dem ersten Flash: KALIBRIEREN, beide Schritte
+# ---------------------------------------------------------------------
+# Die start_calib_*-Werte unten sind - wie bei jedem neuen Geraet - reine
+# Platzhalter und ergeben rechnerisch 3.500 counts/kg. Das ist das
+# vereinbarte Alarmzeichen fuer "noch nicht kalibriert" und steht
+# absichtlich weit weg vom Erwartungsbereich.
+#
+# Erwartet werden nach der Kalibrierung -18.000 bis -21.000 counts/kg
+# (zuletzt an diesen Zellen gemessen: -20.840 bzw. -20.755,9). Der
+# Erwartungsbereich gilt hier unveraendert, weil Waegezellen, Verkabelung
+# und Mechanik dieselben sind - der Kalibrierfaktor haengt an der
+# Bruecke und am HX711, nicht am Mikrocontroller.
+#
+# OFFEN (Stand 28.08.2026): Nach der Kalibrierung auf dem neuen Board
+# steht der Faktor bei -14.081,15 und liegt damit AUSSERHALB dieses
+# Bereichs. Die Signatur "nur der Referenzpunkt gesetzt" ist es nicht -
+# die laege bei rund der Haelfte. Mit einem bekannten Gewicht
+# gegenpruefen: die Anzeige muss um dessen Masse steigen.
+#
+# Ebenfalls pruefen: "Kalibriert bei" darf nicht leer sein, sonst fehlt
+# der Bezugspunkt und die Temperaturkompensation schaltet sich stumm ab.
+# =====================================================================
+
+substitutions:
+  # --- Identitaet (bewusst NICHT waage-eg, siehe Kopf) ---
+  geraete_name: "stockwaage"
+  anzeige_name: "Stockwaage"
+  ap_ssid: "Stockwaage Fallback"
+
+  # --- Board ---
+  # Hier steht bewusst KEIN board: - anders als man es nach den uebrigen
+  # Stock-Dateien erwarten wuerde. Das Board steht ausgeschrieben im
+  # esp32:-Block weiter unten.
+  #
+  # Grund: Die substitution board: existiert in der Basis nur, damit der
+  # dortige esp8266:-Block sie lesen kann. Genau dieser Block wird hier
+  # per !remove entfernt - die Substitution haette also keinen Abnehmer
+  # mehr ausser dem esp32:-Block in dieser Datei selbst. Ein Wert, der in
+  # derselben Datei gesetzt und gelesen wird, gehoert nicht durch eine
+  # Substitution: er waere dann nur noch schwerer zu finden, und zwar an
+  # der einen Stelle, an der man bei einer Board-Portierung zuerst
+  # nachsieht.
+  #
+  # Die Vorgabe d1_mini aus der Basis bleibt damit unbenutzt stehen. Das
+  # ist folgenlos - sie hat nach dem !remove niemanden mehr, der sie
+  # liest.
+
+  # --- Pins (Anschlussplan ESP32 DOIT DevKit V1) ---
+  #
+  # | Funktion       | ESP8266 (waage-eg) | ESP32 (hier) |
+  # |----------------|--------------------|--------------|
+  # | HX711 DOUT     | D6 (GPIO12)        | GPIO16       |
+  # | HX711 CLK      | D1 (GPIO5)         | GPIO17       |
+  # | DS18B20        | D5 (GPIO14)        | GPIO4        |
+  # | Durchsicht-Taster | D2 (GPIO4)      | GPIO34       |
+  # | Durchsicht-LED | D7 (GPIO13)        | GPIO18       |
+  #
+  # Externe Beschaltung unveraendert uebernommen: Pull-up 4,7 kOhm vom
+  # DS18B20-Datenpin gegen 3V3, Vorwiderstand 1 kOhm vor der LED.
+  # Versorgung ueber VIN (5 V) bzw. 3V3; der 3V3-Regler der DevKits
+  # liefert reichlich fuer HX711 samt Bruecke (~5,8 mA).
+  #
+  # Gemiedene Pins und der Grund dafuer:
+  #   GPIO0, 2, 5, 12, 15  Boot-Strapping, brauchen beim Start einen
+  #                        bestimmten Pegel (GPIO12 setzt sogar die
+  #                        Flash-Spannung - genau der Pin, auf dem beim
+  #                        ESP8266 DOUT lag)
+  #   GPIO6-11             fest am SPI-Flash, nicht nutzbar
+  #   GPIO1, 3             UART0, also Konsole und Flashen
+  #   GPIO35, 36, 39       ebenfalls input-only, als Reserve freigehalten
+  #
+  # GPIO16/17 sind auf ESP32-WROOM frei. Sollte spaeter ein
+  # WROVER-Modul zum Einsatz kommen: dort liegt daran das PSRAM, dann
+  # muessen DOUT/CLK umziehen.
+  pin_hx711_dout: GPIO16
+  pin_hx711_clk: GPIO17
+  pin_temperatur: GPIO4
+  # GPIO34 ist INPUT-ONLY und hat keinen internen Pull-up. Deshalb zwei
+  # Dinge: extern 10 kOhm gegen 3V3 verbauen (Taster weiter gegen GND),
+  # und den internen Pull-up der Basis unten abschalten - ohne das
+  # bricht schon "esphome config" ab. Das ist der einzige Punkt, an dem
+  # die Portierung mehr kostet als eine geaenderte Pin-Nummer.
+  pin_taster: GPIO34
+  pin_led: GPIO18
+
+  # --- Deep Sleep (BS250-Lastschalter) ---
+  # Gate des BS250. Ein P-Kanal-MOSFET schaltet HIGH-SIDE: Source an 3V3,
+  # Drain an VCC des HX711-Moduls, Gate hierher. Gate LOW = durchgeschaltet,
+  # deshalb "inverted: true" am switch weiter unten.
+  #
+  # ZWINGEND DAZU: 100 kOhm von Gate nach 3V3 (also Gate->Source).
+  # Im Deep Sleep sind die GPIOs hochohmig - ohne diesen Widerstand schwebt
+  # das Gate und der MOSFET steht undefiniert, im schlimmsten Fall halb
+  # leitend. Der Pull-up zieht das Gate dann auf Source-Potential und
+  # sperrt sicher. Das ist der Ausschalt-Pfad im Schlaf: es gibt keine
+  # Aktion, die das erledigt, das macht dieser Widerstand.
+  # 220 Ohm in Reihe ins Gate schaden nicht (begrenzt den Umladestrom).
+  pin_mosfet_hx711: GPIO25
+
+  # Rastender Schalter (Kipp-/Schiebeschalter, KEIN Taster) gegen GND.
+  # GPIO33 ist weckfaehig (RTC_GPIO8, taugt fuer ext0).
+  #
+  # ACHTUNG, HIER STAND EIN DENKFEHLER: Der interne Pull-up dieses Pins
+  # hilft im Tiefschlaf NICHT. ESPHome setzt ihn ueber den digitalen
+  # GPIO-Treiber, also ueber die IO-MUX-Konfiguration. Sobald
+  # esp_sleep_enable_ext0_wakeup() greift, wird der Pad auf die
+  # RTC-Funktion umgemuxt - dort gilt nur, was ueber rtc_gpio_pullup_en()
+  # gesetzt wurde, und das ruft ESPHome nicht auf. Der Pin schwebt also
+  # im Schlaf.
+  #
+  # Ein schwebender Pin hat keinen definierten Ruhepegel: je nachdem, wo
+  # er landet, gibt es Phantomweckungen, oder KEEP_AWAKE greift beim
+  # Einschlafen und das Geraet legt sich gar nicht erst hin.
+  #
+  # DESHALB EXTERN 10 kOhm VON GPIO33 NACH 3V3, Schalter weiter gegen
+  # GND. Gleiche Beschaltung wie bei GPIO34, anderer Grund - nicht weil
+  # der Pin keinen internen Pull-up HAT, sondern weil er ihn im Schlaf
+  # VERLIERT.
+  #
+  # Geschlossen = LOW = wach.
+  pin_wachhalten: GPIO33
+
+  # NUR NOCH RUECKFALLWERT. Die echte Schlafdauer kommt zur Laufzeit aus
+  # der Number "Messintervall" - siehe Skript schlafdauer_koppeln weiter
+  # unten. Diese Zahl gilt allein in dem Fenster zwischen dem Start des
+  # deep_sleep-Komponenten-Setups und dem ersten Lauf des Skripts, und als
+  # Notnagel, falls die Number keinen Wert hat.
+  #
+  # Bewusst KURZ gewaehlt. Ein zu kurzer Rueckfallwert kostet ein
+  # ueberfluessiges Aufwachen; ein zu langer legt die Waage im Fehlerfall
+  # tagelang schlafen, ohne dass jemand herankommt.
+  #
+  # Der ESP32 hat hier NICHT das 71-Minuten-Limit des ESP8266 (dort steckt
+  # die Zeit in 32 Bit Mikrosekunden); er rechnet in 64 Bit, Tage sind also
+  # problemlos.
+  schlafdauer: "60min"
+
+  # Wachzeit pro Aufwachen. Muss decken: WLAN-Verbindung (~5-10 s),
+  # Einschwingen unten, Veroeffentlichen, etwas Luft. Jede Sekunde hier
+  # geht direkt in die Tagesbilanz - das ist die teuerste Zahl der Datei.
+  #
+  # 200 s statt der urspruenglich geschaetzten 45 s: die Einschwingzeit
+  # unten wurde am 18.08.2026 gemessen und war viel laenger als gedacht.
+  # Von 120 auf 200 s am Geraet nachgezogen - hier uebernommen, damit
+  # Repo und geflashte Datei nicht auseinanderlaufen. Am 19.08.2026 in HA
+  # bestaetigt: das Geraet schlief 200,2 s nach dem Booten ein.
+  #
+  # ZWEIMAL DERSELBE WERT, und zwar zwangslaeufig: deep_sleep braucht eine
+  # Zeitangabe mit Einheit, der Lambda in schlafdauer_koppeln braucht eine
+  # reine Zahl (Sekunden). Deshalb steht die Zahl einmal da und die
+  # Einheit haengt daran - wer 200 aendert, aendert beides.
+  wachzeit_s: "200"
+  wachzeit: "${wachzeit_s}s"
+
+  # Wartezeit nach dem Einschalten des HX711, bevor gemessen wird.
+  #
+  # AM GERAET GEMESSEN am 18.08.2026, und das Ergebnis war die
+  # unangenehmste Ueberraschung des Umbaus. Geschaetzt waren 12 s, weil
+  # die Filterkette nach ~9 s vollaeuft. Der HX711 samt Bruecke braucht
+  # aber viel laenger, bis der Wert ueberhaupt stimmt:
+  #
+  #   nach   0 s:  ~     -1.000 counts
+  #   nach  21 s:  ~   -400.000 counts, Streubreite ~100.000 (5 kg!)
+  #   nach  90 s:  ~   -718.300 counts, Streubreite ~300 (14 g)  <- fertig
+  #
+  # Mit 12 s Wartezeit hat der erste Messzyklus 7,9 kg statt 33,8 kg
+  # veroeffentlicht - ein PLAUSIBLER Wert, der glatt durch das
+  # Plausibilitaetsfenster (-1..150 kg) gegangen waere. Aufgefallen ist es
+  # nur an "Rohwert Streuung": 176.015 counts, also rund 8,5 kg. Genau
+  # dafuer gibt es die Entity.
+  #
+  # 90 s sind deshalb kein Komfortwert, sondern das Minimum. Ueber mehrere
+  # echte Zyklen gegenpruefen: bleibt die Streuung im Bereich einiger
+  # hundert counts, stimmt es.
+  einschwingzeit: "90s"
+
+  # --- Startwerte der Kalibrierung ---
+  # Unveraendert von waage-eg uebernommen, und zwar absichtlich als
+  # Platzhalter: 1750/0.5 ergibt 3.500 counts/kg und macht damit sofort
+  # sichtbar, dass dieses Geraet noch nie kalibriert wurde. Echte Werte
+  # hier einzutragen waere ein Fehler - sie saehen nach einer gueltigen
+  # Kalibrierung aus, ohne je gegen ein Gewicht geprueft worden zu sein.
+  start_calib_raw_zero: "0.0"
+  start_calib_raw_ref: "1750.0"
+  start_calib_kg_ref: "0.5"
+
+  # --- Startwerte der Einstell-Entities ---
+  # "Messintervall" IST der Takt, auch im Deep-Sleep-Betrieb: das Skript
+  # schlafdauer_koppeln setzt sleep_duration daraus. Die Number hat damit
+  # dieselbe Bedeutung wie im Wachbetrieb - eingestellt wird sie in HA,
+  # der Wert hier gilt nur fuer den allerersten Boot mit leerem NVS.
+  #
+  # Die Basis laesst 1 min bis 10.080 min (7 Tage) zu. 72 h sind 4.320 min.
+  start_referenzgewicht: "0.5"
+  start_messintervall: "360"        # min (= 6 h)
+  start_durchsicht_dauer: "60"      # min
+
+  # Temperaturkoeffizient: 32,5 g/K wie bei waage-eg.
+  #
+  # Sonst gilt fuer ein neues Geraet "mit 0 anfangen, bis der eigene
+  # Koeffizient gemessen ist". Hier nicht: der Koeffizient ist eine
+  # Eigenschaft der Waegezellen und der Mechanik, und die sind dieselben.
+  # Der Mikrocontroller geht in die Groesse nicht ein.
+  #
+  # Wird die Portierung dagegen an einem ZWEITEN, eigenen Aufbau
+  # getestet, gehoert hier "0" hin.
+  start_temp_koeffizient: "32.5"    # g/K
+
+packages:
+  basis: !include packages/waage-basis.yaml
+
+# =====================================================================
+# ESP32-spezifische Abweichungen von der Basis
+# =====================================================================
+# Genau vier Stellen. Alles andere - Globals, HX711 mit Filterkette,
+# Messfenster, Kalibrier- und Tara-Buttons, Plausibilitaetsfenster,
+# Kalibrier-Sperre, Durchsichtmodus, Taktgeber - kommt unveraendert aus
+# packages/waage-basis.yaml.
+
+# --- 1) Plattformblock tauschen ---
+# Die Basis bringt einen esp8266:-Block mit. Beide Plattformbloecke
+# gleichzeitig gehen nicht, und ein Package-Wert laesst sich nur
+# ueberschreiben, nicht loeschen - dafuer gibt es !remove.
+esp8266: !remove
+
+esp32:
+  # NodeMCU-32S ist mit diesem Board-Profil kompatibel: beide sind
+  # ESP32-WROOM-32 mit 4 MB Flash.
+  board: esp32doit-devkit-v1
+  framework:
+    # Vorgabe von ESPHome 2026.6.5 fuer ESP32 ist ohnehin esp-idf; hier
+    # ausgeschrieben, damit ein spaeterer Wechsel der Vorgabe dieses
+    # Geraet nicht unbemerkt auf eine andere Toolchain schiebt.
+    type: esp-idf
+
+# --- 2) restore_from_flash hat auf dem ESP32 KEINE Entsprechung ---
+# und braucht auch keine. Das ist kein Weglassen aus Bequemlichkeit,
+# sondern ein echter Plattformunterschied - nachgesehen im Quelltext von
+# ESPHome 2026.6.5:
+#
+#   esp8266/preferences.cpp  make_preference(length, type, in_flash)
+#       Der Platz eines restore_value-Globals ergibt sich aus der
+#       REIHENFOLGE der Aufrufe (current_flash_offset += total_words).
+#       Der Namens-Hash geht nur in die CRC ein. Ein neu hinzugefuegtes
+#       Global mit restore_value: yes verschiebt deshalb alles
+#       Nachfolgende, die CRC schlaegt fehl, die Werte fallen auf
+#       initial_value zurueck. Genau das hat am 03.08. und am 10.08.2026
+#       die Kalibrierung gekostet.
+#       Ohne restore_from_flash: true landet ausserdem alles nur im
+#       RTC-RAM und ist bei Stromausfall weg.
+#
+#   esp32/preferences.cpp    make_preference(length, type)
+#       Jedes Global bekommt einen EIGENEN NVS-Eintrag, dessen Schluessel
+#       der Hash des Globals ist (1944399030 ^ name_hash, siehe
+#       globals_component.h) - nvs_set_blob/nvs_get_blob unter genau
+#       diesem Namen. Keine Offsets, keine Reihenfolge. NVS liegt im
+#       Flash, ein Stromausfall ist also unkritisch.
+#
+# Zwei Folgerungen fuer dieses Geraet:
+#
+#   a) Der Dauerbrenner "ein Flash mit einem neuen Global kostet die
+#      Kalibrierung" faellt hier strukturell weg. Ein neues Global
+#      belegt einen neuen NVS-Schluessel und laesst die bestehenden in
+#      Ruhe - unabhaengig davon, ob es restore_value: yes oder no hat,
+#      und unabhaengig davon, wo in der Datei es steht.
+#   b) Die Regel "nach jedem Flash den Kalibrierfaktor pruefen" bleibt
+#      trotzdem stehen. Sie kostet dreissig Sekunden, und sie faengt
+#      auch die Faelle, die mit den Preferences nichts zu tun haben
+#      (halbe Kalibrierung, verrutschte Zelle, geleertes NVS nach einem
+#      "Clean build"-Lauf).
+#
+# Was auf dem ESP32 dafuer NEU zu beachten ist: NVS wird durch
+# erase_flash / "Clean Build Files" mitgeloescht, und beim ESP8266 lag
+# der Preferences-Bereich ausserhalb dessen, was ein OTA anfasst.
+# Vor einem Erase also den Kalibrierfaktor notieren.
+
+# --- 3) WLAN-Stromsparmodus auf dem Wert des ESP8266 festhalten ---
+# Kein Wunsch, sondern eine Reparatur: die Vorgabe von power_save_mode ist
+# plattformabhaengig - auf dem ESP8266 NONE, auf dem ESP32 LIGHT. Ohne
+# diese Zeile haette die Portierung also nebenbei den Stromsparmodus
+# eingeschaltet, ohne dass es irgendwo in dieser Datei steht.
+#
+# Aufgefallen ist es nur im Diff der aufgeloesten Konfiguration - im YAML
+# ist davon nichts zu sehen. Genau dafuer ist der Diff da.
+#
+# NONE ist hier auch sachlich richtig: Die Waage steht am Rand der
+# Funkabdeckung (-74 bis -76 dBm an waage-eg), und Light Sleep laesst den
+# Empfaenger zwischen den Beacons schlafen - das kostet an einer ohnehin
+# knappen Verbindung Stabilitaet. Gespart wuerde dafuer Strom, den dieses
+# Geraet am Netzteil nicht sparen muss. Fuer einen spaeteren
+# Solar-/Batteriebetrieb ist das eine der Stellschrauben, aber das ist
+# ausdruecklich nicht Gegenstand dieser Portierung.
+wifi:
+  power_save_mode: NONE
+  # Spart im Weckfenster den WLAN-Scan - der groesste Einzelposten beim
+  # Verbindungsaufbau und damit bares Guthaben in der Tagesbilanz.
+  # Setzt voraus, dass sich Kanal und BSSID nicht staendig aendern.
+  fast_connect: true
+  # Noch mehr braechte eine feste IP (spart DHCP). Bewusst NICHT gesetzt:
+  # das Geraet haengt per DHCP im Netz, und eine falsch geratene
+  # Netzmaske oder ein falsches Gateway macht es unerreichbar - im
+  # Deep-Sleep-Betrieb heisst das USB-Kabel.
+  #
+  # STATTDESSEN EINE FESTE LEASE IN DER FRITZ!BOX vergeben. Am 28.08.2026
+  # wanderte die Adresse beim Boardwechsel von .171 auf .115, und HA
+  # brauchte eine Reconfigure, um wieder heranzukommen. mDNS ist hier
+  # keine Alternative: bienenwaage.local liess sich nicht aufloesen.
+  #
+  # Wenn doch statisch gewuenscht:
+  #
+  #   manual_ip:
+  #     static_ip: 192.168.1.115
+  #     gateway: 192.168.1.1
+  #     subnet: 255.255.255.0
+
+# --- 4) Durchsicht-Taster: interner Pull-up ist auf GPIO34 nicht moeglich ---
+# Die Basis konfiguriert den Taster mit "pullup: true" - auf dem ESP8266
+# richtig, auf GPIO34 des ESP32 ein Validierungsfehler: GPIO34-39 sind
+# input-only und haben ueberhaupt keine internen Pull-Widerstaende.
+#
+# !extend greift den Eintrag der Basis ueber seine ID heraus und
+# ueberschreibt gezielt dieses eine Feld. Ohne !extend waere es ein
+# ZWEITER binary_sensor mit derselben ID (Listen aus Packages werden
+# aneinandergehaengt, nicht ueber die ID zusammengefuehrt) - und damit
+# ein Fehler.
+#
+# Pin-Nummer, "inverted" und die Entprellung bleiben aus der Basis:
+# der externe 10-kOhm-Pull-up gegen 3V3 macht die Logik identisch zum
+# internen des ESP8266 (Ruhe = high, gedrueckt = low), "inverted"
+# stimmt also weiterhin.
+binary_sensor:
+  - id: !extend durchsicht_taster
+    pin:
+      mode:
+        pullup: false
+
+  # --- Softwareschalter: Spiegel eines HA-Helfers ---
+  # BEWUSST NICHT ein template-switch auf dem Geraet: der wuerde seinen
+  # Zustand zwar ueber NVS behalten, aber ein Umlegen WAEHREND DES SCHLAFS
+  # ginge verloren - das Geraet ist dann nicht erreichbar. Genau das ist
+  # aber der Hauptfall ("ich will gleich ein OTA fahren, bleib wach").
+  #
+  # Ein homeassistant-binary_sensor holt sich beim Verbinden den AKTUELLEN
+  # Stand des Helfers. Umlegen im Schlaf wirkt damit beim naechsten
+  # Aufwachen - man legt den Schalter um und wartet eine Schlafphase ab.
+  - platform: homeassistant
+    id: wachhalten_ha
+    # DIE EINZIGE STELLE, AN DER DIE FIRMWARE EINE HA-ENTITY REFERENZIERT.
+    # Am 28.08.2026 von input_boolean.stockwaage_wachhalten nachgezogen,
+    # nachdem der Helfer in HA umbenannt wurde. Wird er erneut umbenannt,
+    # faellt das Wachhalten ueber HA STUMM aus: der Sensor bekommt nie
+    # einen Zustand, deep_sleep.prevent laeuft nicht, und der wait_until
+    # unten laeuft jedes Mal in seinen Timeout.
+    entity_id: input_boolean.bienenwaage_wachhalten
+
+    # OHNE DIESE ZEILE FEUERT on_state BEIM AUFWACHEN NICHT.
+    #
+    # Das war der Fehler vom 19.08.2026: Helfer stand auf "an", das Geraet
+    # kam hoch, holte den Zustand - und schlief nach run_duration trotzdem
+    # ein. Im YAML ist davon nichts zu sehen; nachgesehen im Quelltext von
+    # ESPHome 2026.7.4, binary_sensor/__init__.py:
+    #
+    #   trigger = config.get(CONF_TRIGGER_ON_INITIAL_STATE, False) or ...
+    #   cg.add(var.set_trigger_on_initial_state(trigger))
+    #
+    # Die Vorgabe in binary_sensor.h ist zwar true, der Codegenerator
+    # ueberschreibt sie aber IMMER - fehlt der Schluessel, mit false.
+    # Ausgewertet wird das in core/entity_base.h:
+    #
+    #   if (new_state.has_value() &&
+    #       (had_state || this->get_trigger_on_initial_state()))
+    #     this->state_callbacks_.call(new_state.value());
+    #
+    # Der erste Zustand aus HA laeuft ueber publish_initial_state(), und
+    # das ruft vorher invalidate_state() - had_state ist also false. Der
+    # allererste Wert nach dem Booten loest damit kein on_state aus.
+    #
+    # An einem dauerhaft laufenden Geraet faellt das nie auf: jedes
+    # spaetere Umlegen hat had_state=true. An einem Deep-Sleep-Geraet ist
+    # der erste Wert der EINZIGE, auf den es ankommt.
+    trigger_on_initial_state: true
+
+    # DIE Stelle, an der das Wachhalten wirklich haengt - nicht der
+    # on_boot-Block unten.
+    #
+    # Warum: on_boot wartet auf "api.connected" und prueft DANN. Der
+    # Zustand dieses Sensors kommt aber erst ein Stueck NACH dem
+    # Verbindungsaufbau herein. Die Pruefung lief damit mal vor und mal
+    # nach dem Eintreffen - am 18.08.2026 am Geraet beobachtet: einmal
+    # blieb es wach, beim naechsten Boot schlief es trotz gesetztem
+    # Helfer ein. Ein Wettlauf, kein Zufall.
+    #
+    # on_state feuert, sobald der Zustand da ist - auch beim allerersten
+    # Eintreffen nach dem Verbinden. Und es wirkt zusaetzlich zur
+    # Laufzeit, wenn man den Helfer umlegt, waehrend das Geraet wach ist.
+    on_state:
+      - if:
+          condition:
+            binary_sensor.is_on: wachhalten_ha
+          then:
+            - deep_sleep.prevent: tiefschlaf
+            - logger.log: "Wachhalten (HA) an - Deep Sleep ausgesetzt"
+          else:
+            - deep_sleep.allow: tiefschlaf
+            - logger.log: "Wachhalten (HA) aus - Deep Sleep wieder frei"
+
+  # --- Hardwareschalter, nur zur Anzeige ---
+  # Das Wachhalten selbst macht NICHT dieser binary_sensor, sondern
+  # wakeup_pin_mode: KEEP_AWAKE im deep_sleep-Block. Hier steht er nur,
+  # damit in HA sichtbar ist, warum das Geraet wach ist.
+  #
+  # VERDACHTSFALL (Stand 28.08.2026): Wenn der Schalter das schlafende
+  # Geraet nicht weckt und auch ein externer Pull-up an GPIO33 nichts
+  # aendert, ist die Doppelnutzung des Pins der naechste Kandidat - hier
+  # haengt er an der digitalen IO-Matrix, im deep_sleep-Block am RTC-Mux.
+  # Zum Pruefen diesen Block samt beider allow_other_uses voruebergehend
+  # herausnehmen und flashen.
+  - platform: gpio
+    id: wachhalten_schalter
+    name: "Wachhalten (Schalter)"
+    entity_category: diagnostic
+    icon: "mdi:sleep-off"
+    pin:
+      number: ${pin_wachhalten}
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+      # Derselbe Pin dient unten als Weckpin. ESPHome verweigert eine
+      # Doppelbelegung sonst hart (Exit 2, "Pin 33 is used in multiple
+      # places") - allow_other_uses ist die dafuer vorgesehene Freigabe
+      # und MUSS an BEIDEN Stellen stehen, sonst meldet die Validierung
+      # "incorrectly sets allow_other_uses: true".
+      allow_other_uses: true
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 50ms
+
+# Eigener API-Key / OTA-Passwort nur fuer dieses Geraet waere hier
+# moeglich (Werte aus dieser Datei haben Vorrang vor denen aus dem
+# Package). Bewusst nicht gemacht - es teilt sich den Key mit den
+# uebrigen Stoecken:
+#
+#   api:
+#     encryption:
+#       key: !secret api_key_esp32_test
+
+
+# =====================================================================
+# Deep Sleep
+# =====================================================================
+# NUR IN DIESER DATEI, NICHT IN packages/waage-basis.yaml. Die Basis trug
+# frueher auch waage-eg; ein deep_sleep: dort haette beim naechsten Flash
+# das produktive ESP8266-Geraet schlafen gelegt.
+#
+# Was der ESP32 gegenueber der Vorarbeit in
+# docs/deep-sleep-vorbereitung.md aendert (die ist fuer den ESP8266
+# geschrieben):
+#
+#   - Die Bruecke GPIO16 <-> RST entfaellt ersatzlos. Der ESP32 weckt
+#     ueber seinen RTC-Timer intern; GPIO16 ist hier ohnehin DOUT.
+#   - Aufwachen per GPIO ist moeglich (ext0/ext1) - beim ESP8266 ging
+#     ausschliesslich der Timer. Genau davon lebt der Hardwareschalter.
+#   - Die 71-Minuten-Grenze der Schlafdauer gilt nicht (64 statt 32 Bit).
+#   - Der Pull-up von SCK nach 3V3 aus Abschnitt 2 wird NICHT gebraucht
+#     und waere hier sogar schaedlich: er haengt an DAUERHAFTEN 3V3 und
+#     wuerde ueber die Schutzdiode am SCK-Eingang Strom in den
+#     abgeschalteten HX711 speisen. Der MOSFET nimmt ihm die Aufgabe ab.
+deep_sleep:
+  id: tiefschlaf
+  sleep_duration: ${schlafdauer}
+  run_duration: ${wachzeit}
+
+  # --- Hardwareschalter ---
+  # KEEP_AWAKE ist der eingebaute Mechanismus dafuer, nachgesehen in
+  # components/deep_sleep/deep_sleep_esp32.cpp:
+  #
+  #   if (wakeup_pin_mode_ == WAKEUP_PIN_MODE_KEEP_AWAKE &&
+  #       wakeup_pin_ != nullptr && wakeup_pin_->digital_read()) {
+  #     ESP_LOGW(TAG, "Waiting for wakeup pin state change");
+  #     return false;   // -> es wird nicht geschlafen
+  #   }
+  #
+  # digital_read() beruecksichtigt "inverted", geschlossener Schalter
+  # (= LOW) heisst also "wach bleiben". Geprueft wird bei JEDEM
+  # Schlafversuch, nicht nur beim Booten: Schalter umlegen wirkt sofort,
+  # in beide Richtungen.
+  #
+  # Der Weckpegel ergibt sich aus "inverted": deep_sleep_esp32.cpp rechnet
+  # level = !is_inverted(), hier also 0 - geweckt wird auf LOW, und LOW
+  # heisst geschlossener Schalter. Das ist richtig so.
+  #
+  # OFFEN (28.08.2026): Das Wecken aus dem Schlaf funktioniert nicht.
+  # Konfiguration und Pegel stimmen; der Verdacht liegt auf dem
+  # schwebenden Pin im Schlaf - siehe die Erlaeuterung bei
+  # pin_wachhalten. Erst den externen 10-kOhm-Pull-up nachruesten.
+  wakeup_pin:
+    number: ${pin_wachhalten}
+    mode:
+      input: true
+      pullup: true
+    inverted: true
+    allow_other_uses: true      # Gegenstueck zum binary_sensor oben
+  wakeup_pin_mode: KEEP_AWAKE
+
+# --- Schlafdauer an das Messintervall koppeln ---
+# Ohne das gibt es zwei Takte, die nichts voneinander wissen: sleep_duration
+# bestimmt, wann gemessen wird, und die Number "Messintervall" bestimmt, was
+# in HA als Messintervall steht. Wer die Number verstellt, aendert dann nur
+# die Beschriftung - genau die Sorte stiller Abweichung, die man erst nach
+# Tagen an der Kurve merkt.
+#
+# Gerechnet wird mit der PERIODE, nicht mit der Schlafdauer:
+#
+#     Messintervall = Schlafdauer + Wachzeit
+#
+# Der Abstand zwischen zwei Messungen ist damit wirklich der eingestellte
+# Wert. Bei 72 h faellt die Wachzeit nicht ins Gewicht (0,08 %), bei 30 min
+# waeren es 11 % - und ohne den Abzug liefe die Messreihe langsam weg.
+#
+# set_sleep_duration nimmt Millisekunden als uint32_t (deep_sleep_component.h).
+# Das reicht bis 49,7 Tage; die Obergrenze der Number sind 7 Tage.
+script:
+  - id: schlafdauer_koppeln
+    then:
+      - lambda: |-
+          const float min_f = id(mess_intervall).state;
+          // Beim allerersten Boot hat die Number noch keinen Wert. Dann
+          // bleibt der Rueckfallwert aus den substitutions stehen.
+          if (std::isnan(min_f) || min_f < 1.0f) {
+            ESP_LOGW("waage", "Messintervall noch ohne Wert - Schlafdauer "
+                              "bleibt beim Rueckfallwert");
+            return;
+          }
+          const uint32_t wach_ms = ${wachzeit_s} * 1000UL;
+          const uint64_t periode_ms = (uint64_t) (min_f * 60000.0);
+          // Untergrenze 60 s: bei einem Messintervall, das kuerzer ist als
+          // die Wachzeit, ergaebe die Subtraktion sonst einen Unterlauf.
+          // Ein solches Intervall ist im Deep-Sleep-Betrieb ohnehin sinnlos -
+          // es soll aber nicht zu 49 Tagen Schlaf fuehren.
+          const uint32_t schlaf_ms =
+              periode_ms > (uint64_t) wach_ms + 60000ULL
+                  ? (uint32_t) (periode_ms - wach_ms)
+                  : 60000UL;
+          id(tiefschlaf).set_sleep_duration(schlaf_ms);
+          ESP_LOGI("waage",
+                   "Messintervall %.0f min -> Schlafdauer %u s (+ %u s wach)",
+                   min_f, schlaf_ms / 1000UL, wach_ms / 1000UL);
+
+# Die Number selbst kommt aus der Basis; !extend haengt nur eine weitere
+# Aktion an ihr on_value an (Listen aus Packages werden aneinandergehaengt).
+# Damit wirkt ein Verstellen in HA sofort - und auch beim Booten, weil
+# restore_value die Number wiederherstellt und dabei on_value ausloest.
+number:
+  - id: !extend mess_intervall
+    on_value:
+      - script.execute: schlafdauer_koppeln
+
+# --- Lastschalter fuer den HX711 (BS250) ---
+# Der eigentliche Zweck der Uebung. Laut docs/deep-sleep-vorbereitung.md
+# ziehen HX711 und Waegezellenbruecke zusammen ~5,8 mA DAUERHAFT - der
+# schlafende ESP32 liegt bei ~0,01 mA. Ohne diesen Schalter bringt Deep
+# Sleep also fast nichts (Variante C der Tabelle dort: ~17 Tage), mit ihm
+# wird daraus Variante D (~200 Tage).
+#
+# Bewusst ein switch und kein output: restore_mode: ALWAYS_ON schaltet die
+# Versorgung schon beim Setup ein, ohne dass es dafuer eine on_boot-Aktion
+# und damit eine Reihenfolgefrage gegenueber dem HX711-Setup gibt.
+#
+# In HA sichtbar, weil man ihn fuer die Ruhestrommessung aus Punkt 8.1 des
+# Vorbereitungsdokuments von Hand ausschalten koennen will. ACHTUNG: Wer
+# ihn ausschaltet, legt die Waage still - der Rohwert bleibt dann leer.
+switch:
+  - platform: gpio
+    id: hx711_versorgung
+    name: "HX711-Versorgung"
+    entity_category: diagnostic
+    icon: "mdi:power-plug"
+    pin: ${pin_mosfet_hx711}
+    # P-Kanal: Gate LOW = leitend. "inverted" dreht das so, dass
+    # "an" in HA auch "HX711 hat Strom" heisst.
+    inverted: true
+    restore_mode: ALWAYS_ON
+
+# --- Der HX711 muss im Weckfenster schneller einschwingen ---
+# Die Basis taktet ihn mit 1 s. Median(5) + gleitendes Mittel(12) brauchen
+# damit ~60 s, bis hinten der erste Wert herauskommt - laenger als das
+# ganze Weckfenster. Statt die Filterkette zu kuerzen (die haengt an der
+# Mechanik, nicht am Wandler) wird hier schlicht schneller abgetastet:
+# bei 150 ms liefert der Median alle 0,75 s, die Kette ist nach gut 9 s
+# voll. Dieselbe Glaettung, ein Bruchteil der Zeit.
+#
+# NICHT 100 ms, obwohl das rechnerisch zur Wandlungsrate passen wuerde.
+# Der ESPHome-Treiber WARTET NICHT auf "Daten bereit" (hx711.cpp):
+#
+#   if (this->dout_pin_->digital_read()) {
+#     ESP_LOGW(TAG, "HX711 is not ready for new measurements yet!");
+#     return false;            // veroeffentlicht nichts
+#   }
+#
+# Bei Gain 128 wandelt der HX711 mit ~10 Werten/s. Pollt man mit genau
+# 100 ms, greift man staendig knapp daneben und verwirft Messungen -
+# im schlimmsten Fall dauerhaft, weil ESP-Timer und HX711-Oszillator
+# zueinander stehenbleiben koennen. Etwas LANGSAMER als die Wandlung
+# abzutasten ist deshalb strikt besser: dann liegt immer ein fertiger
+# Wert bereit.
+#
+# Das Einschwingen der MECHANIK ist davon unberuehrt - dafuer stehen die
+# 90 s in einschwingzeit, gemessen am Geraet.
+sensor:
+  - id: !extend hx711_raw_counts
+    update_interval: 150ms
+
+# --- Kein Webserver im Batteriebetrieb ---
+# Kostet RAM und im Weckfenster Rechenzeit, und die Weboberflaeche ist bei
+# 200 s Wachzeit ohnehin kaum bedienbar. Wer sie zum Debuggen braucht,
+# legt den Wachhalten-Schalter um und kommentiert diese Zeile aus.
+web_server: !remove
+
+esphome:
+  on_boot:
+    # --- 700: nach den Globals, vor dem Taktgeber -------------------------
+    # DEN ANLAUF DES TAKTGEBERS UEBERSPRINGEN, UND ZWAR FRUEH GENUG.
+    #
+    # Der interval-60s-Block der Basis prueft "erste_messung_erfolgt". Das
+    # Global ist restore_value: no, nach jedem Aufwachen aus dem Tiefschlaf
+    # also wieder false - der Taktgeber haelt sich fuer frisch gebootet und
+    # veroeffentlicht sofort, damit nach einem Neustart nicht ein ganzes
+    # Intervall lang nichts in HA steht. An einem dauerhaft laufenden Geraet
+    # ist das richtig, hier ist es falsch: der Wert ist dann noch nicht
+    # eingeschwungen (gemessen: 90 s, siehe einschwingzeit).
+    #
+    # WARUM PRIORITAET 700 UND NICHT -100:
+    # Der erste Tick eines interval-Blocks kommt NICHT nach 60 s, sondern
+    # nach einem Zufallsversatz von 0 bis 30 s - core/scheduler.cpp:
+    #
+    #   uint32_t max_offset = std::min(delay / 2, MAX_INTERVAL_DELAY);
+    #   // first execution happens immediately after a random smallish offset
+    #   item->set_next_execution(now_64 + offset);
+    #
+    # und core/component.cpp startet den Poller sogar VOR setup():
+    #
+    #   void PollingComponent::call_setup() {
+    #     this->start_poller();
+    #     this->setup();
+    #
+    # Weil ESPHome den Scheduler schon waehrend App.setup() laufen laesst,
+    # solange es auf langsame Komponenten (WLAN) wartet, kann dieser erste
+    # Tick VOR einem on_boot mit Prioritaet -100 kommen. Genau das war am
+    # 19.08.2026 der Fall - in der HA-Historie zwei Sendevorgaenge pro
+    # Weckfenster, einer davon schon bei 9,68 s Betriebszeit.
+    #
+    # 700 liegt zwischen den Globals (HARDWARE = 800, globals_component.h)
+    # und dem IntervalTrigger (DATA = 600, Vorgabe von Component). Damit ist
+    # das Global initialisiert und der Taktgeber noch nicht angelaufen.
+    - priority: 700
+      then:
+        - lambda: 'id(erste_messung_erfolgt) = true;'
+
+    # LATE: WLAN und API sind zu diesem Zeitpunkt am Starten.
+    - priority: -100
+      then:
+        # ZUERST die Schlafdauer setzen, noch vor jedem Warten. Sonst
+        # schliefe ein Geraet, das die API nicht erreicht, mit dem
+        # Rueckfallwert statt mit dem eingestellten Intervall.
+        - script.execute: schlafdauer_koppeln
+
+        # ERST EINSCHWINGEN LASSEN, DANN AUF HOME ASSISTANT WARTEN -
+        # und nicht umgekehrt.
+        #
+        # Die Reihenfolge war bis zum 19.08.2026 andersherum und damit
+        # falsch. Am Geraet gemessen: der WLAN- und API-Anlauf brauchte
+        # 37,3 s (Boot 19:44:27,7, erster Kontakt in HA 19:45:05,1). Der
+        # wait_until stand davor und gab nach 20 s auf - die Pruefung lief
+        # also JEDES MAL ins Leere, und die Einschwingzeit begann erst
+        # danach, wodurch erst bei 110 s statt bei 90 s gesendet wurde.
+        #
+        # So herum laufen Einschwingen und Verbindungsaufbau parallel. Nach
+        # den 90 s ist der Zustand laengst da, der wait_until kehrt sofort
+        # zurueck, und das Warten kostet nichts mehr.
+        - delay: ${einschwingzeit}
+
+        # Auf den ZUSTAND warten, nicht auf die Verbindung. api.connected
+        # ist zu frueh: der Wert des homeassistant-binary_sensors trifft
+        # erst ein Stueck nach dem Verbindungsaufbau ein.
+        #
+        # Der timeout ist das Sicherheitsnetz: ohne ihn haenge das Geraet
+        # bei WLAN-Ausfall bis run_duration und schliefe nie mit gefuelltem
+        # Messfenster ein. 90 s + 30 s passen unter die wachzeit von 200 s.
+        #
+        # Zusammen mit trigger_on_initial_state oben ist das doppelt
+        # gemoppelt, und zwar mit Absicht: der on_state-Weg wirkt auch,
+        # wenn der Helfer waehrend des Weckfensters umgelegt wird, dieser
+        # hier auch dann noch, wenn eine kuenftige ESPHome-Version an der
+        # Rueckruf-Logik wieder etwas dreht.
+        - wait_until:
+            condition:
+              lambda: 'return id(wachhalten_ha).has_state();'
+            timeout: 30s
+        - if:
+            condition:
+              binary_sensor.is_on: wachhalten_ha
+            then:
+              - deep_sleep.prevent: tiefschlaf
+              - logger.log: "Wachhalten ueber HA aktiv - Deep Sleep ausgesetzt"
+            else:
+              - logger.log: "Wachhalten aus oder Zustand nicht eingetroffen - regulaerer Ablauf"
+
+        # Jetzt GENAU EINMAL veroeffentlichen. Bewusst nicht dem
+        # 60-s-Taktgeber der Basis ueberlassen. Reihenfolge wie dort - erst
+        # das Messfenster abschliessen (setzt die mittel_*-Globals), dann
+        # senden.
+        - script.execute: messfenster_abschliessen
+        - script.wait: messfenster_abschliessen
+        - script.execute: messwerte_veroeffentlichen
+        - logger.log: "Messung im Weckfenster abgeschlossen"
