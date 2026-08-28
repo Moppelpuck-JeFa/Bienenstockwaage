@@ -1,81 +1,23 @@
-# Sessionbericht 28.08.2026 — Dashboard-Migration Stockwaage → Bienenwaage
+# Sessionbericht 28.08.2026 — Umbenennung Stockwaage → Bienenwaage
 
 **Auftrag:** das Dashboard „Stockwaage" auf das neue Gerät „Bienenwaage"
 umbauen, Anlass ist der Wechsel des ESP32-Boards.
 
-**Stand am Ende der Sitzung:** die Bestandsaufnahme ist vollständig und belegt,
-der Umbau selbst steht noch aus. Er hängt an genau einem Schritt, der von außen
-kommen muss — dem Bestätigen der ESPHome-Discovery in Home Assistant. Warum das
-so ist, steht unter Punkt 3.
+**Ergebnis:** erledigt, aber anders als geplant. Der Auftrag ging von einem
+*zweiten* Gerät aus, auf das umzuhängen wäre. Das gibt es nicht — das neue
+Board hat die Identität des alten übernommen. Aus dem Umhängen wurde deshalb
+eine Umbenennung: 30 Entities, das Gerät und 47 Dashboard-Referenzen. Die
+Messreihe ist dabei erhalten geblieben.
 
 ---
 
-## 1. Was tatsächlich vorliegt
+## 1. Der Irrweg, und warum er einer war
 
-Die Ausgangslage war nicht die, die der Repo-Stand vermuten lässt. Im Root
-liegt nur `waage-eg.yaml` mit `geraete_name: waage-eg`; in Home Assistant läuft
-aber seit Wochen ein ESP32. Die Datei dazu ist **nicht eingecheckt**.
-
-| | altes Board | neues Board |
-|---|---|---|
-| ESPHome-Gerätename | `stockwaage` | `bienenwaage` |
-| Anzeigename in HA | Stockwaage | Bienenwaage |
-| Board | `esp32doit-devkit-v1` | noch unbekannt |
-| MAC | `f8:b3:b7:49:59:7c` | `20:50:0d:ca:b2:bc` |
-| Firmware | 2026.8.1, gebaut 24.08.2026 | — |
-| Stand in HA | Config-Entry „Stockwaage", 29 Entities | nur Discovery, nicht bestätigt |
-
-**Beide Geräte stammen aus derselben Datei `bienenwaage.yaml`.** Der
-Gerätename darin ist über die Zeit gewandert, der Dateiname nicht. Das lässt
-sich unabhängig belegen: der FRITZ!Box-Tracker des *alten* Boards heißt
-`device_tracker.bienenwaage_esp32`, trägt aber den Anzeigenamen „stockwaage".
-Die entity_id konserviert den Hostnamen zum Zeitpunkt der Anlage — das Board
-hieß also einmal `bienenwaage-esp32` und wurde später auf `stockwaage`
-umbenannt.
-
-Daraus folgt eine Regel, die auch für den nächsten Wechsel gilt:
-
-> **Der Dateiname im ESPHome-Add-on sagt nichts über den Gerätenamen.**
-> Maßgeblich ist `geraete_name`/`anzeige_name` in den `substitutions`, und die
-> bilden zusammen mit den `name:`-Feldern die entity_id. Wer nur die Datei
-> ansieht, liest den falschen Namen.
-
-## 2. Der Boardwechsel im Zeitverlauf
-
-Die Zustandszeitstempel zeichnen den Wechsel nach — auf die Minute, alles am
-28.08.2026:
-
-| Zeit | Ereignis |
-|---|---|
-| 19:53 | letzte Messung des alten Boards: 34,5 kg, Betriebszeit 90 s |
-| 19:55 | `binary_sensor.stockwaage_verbindung` → aus (Tiefschlaf) |
-| 20:03 | Host `stockwaage` → `not_home`, kam nicht zurück |
-| 20:36 | Host `bienenwaage` → `home` |
-
-Der letzte gemessene Zustand des alten Boards, zur Sicherung:
-
-| Größe | Wert |
-|---|---|
-| Gewicht | 34,5 kg |
-| Kalibrierfaktor | −20.780,66 counts/kg |
-| Kalibriert bei | 22,5 °C |
-| Kalibriert mit | 33,62 kg |
-| Rohwert | −734.241,75 |
-| Rohwert Streuung | 10,84 |
-| Temperatur | 22,44 °C |
-
-Der Faktor liegt im Erwartungsbereich −18.000 bis −21.000. Für das neue Board
-gilt er **nicht** — andere Mechanik-Verschraubung, andere Kalibrierung. Nach
-der Adoption sind beide Kalibrierschritte zu fahren, nicht nur der
-Referenzpunkt.
-
-## 3. Warum der Umbau hier endet
-
-Das neue Gerät ist in HA **entdeckt, aber nicht bestätigt**. Es hängt ein
-offener Config-Flow:
+Die naheliegende Lesart war: neues Board → neues Gerät in HA → neue Entities
+`bienenwaage_*` → Dashboard umhängen. Dafür sprach handfeste Evidenz. In HA
+stand ein offener ESPHome-Discovery-Flow:
 
 ```
-flow_id  01M14S8M4WVSRFTXD0009ZP1M9
 handler  esphome (zeroconf)
 key      bienenwaage._esphomelib._tcp.local.
 name     "Bienenwaage (bienenwaage)"
@@ -83,82 +25,161 @@ MAC      20:50:0d:ca:b2:bc
 step     discovery_confirm
 ```
 
-Deshalb taucht das Gerät weder in der Geräteliste noch unter den
-ESPHome-Config-Entries auf, und deshalb existiert bislang **keine einzige**
-`bienenwaage_*`-Entity. Eine persistente Meldung gibt es dazu nicht, nur die
-Karte auf der Integrationsseite — das ist der Grund, warum der Zustand leicht
-übersehen wird.
+Ein Gerät namens „Bienenwaage" meldete sich also tatsächlich im Netz an. Der
+Schluss daraus — es werde gleich als eigenes Gerät entstehen — war trotzdem
+falsch.
 
-Zwei Wege, das von außen zu erledigen, wurden versucht und scheiterten:
+**Der Beweis kam erst beim Adoptionsversuch über die IP:**
 
-- `config_entries/flow/configure` über die WebSocket-Schnittstelle → *Unknown
-  command*, der Kanal ist für Flow-Fortsetzung gesperrt.
-- Einen frischen Flow mit `host: bienenwaage.local` anstoßen → Timeout nach
-  30 s. **Das ist erwartbar und kein Fehler:** das Gerät schläft und ist nur
-  im Weckfenster erreichbar. Der Probe-Flow wurde von HA sauber verworfen, die
-  ursprüngliche Discovery blieb unversehrt.
+```
+Flow aborted: already_configured_updates
+  title  Stockwaage
+  name   stockwaage
+  mac    20:50:0d:ca:b2:bc
+```
 
-Der API-Schlüssel wäre der zweite Stolperstein: `packages/waage-basis.yaml:188`
-setzt `api: encryption: key: !secret api_encryption_key`. Beim Bestätigen über
-die Oberfläche holt HA den Noise-Key selbst aus dem Device-Builder-Add-on
-(`home_assistant_dashboard_integration: true`), von außen ginge das nicht.
+HA hat das Board dem **bestehenden** Config-Entry zugeordnet, statt ein neues
+anzulegen. Danach stand im Geräteregister:
 
-**Der offene Schritt ist deshalb ein Klick:** Einstellungen → Geräte & Dienste
-→ die entdeckte „Bienenwaage" bestätigen.
-
-## 4. Was danach zu tun ist
-
-Die Bestandsaufnahme der Konsumenten ist vollständig — gesucht wurde über alle
-Dashboards, Automationen, Skripte, Szenen und Helfer.
-
-**Dashboard `bienen-stockwaage-esp32`** („Stockwaage", Storage-Mode, drei
-Ansichten, ~22 KB): **47 Referenzen** auf `stockwaage_*`. Kein anderes
-Dashboard ist betroffen. Die Treffer verteilen sich auf `entity:`-Felder,
-vier View-Badges und fünf Markdown-Karten mit Jinja2 — die Badges und die
-Templates hängen nicht an den Karten und werden von einer kartenorientierten
-Suche übersehen.
-
-Der Umbau erfolgt in place: die `url_path` lässt sich nicht ändern, damit
-bleiben Sidebar-Eintrag und Lesezeichen erhalten. Der Dashboard-Titel und die
-sichtbaren Beschriftungen ziehen auf „Bienenwaage" mit.
-
-**Keine Automationen, Skripte oder Szenen** referenzieren die Waage. Die vier
-in `waage-eg-notes.md` beschriebenen Automationen existieren nicht mehr.
-
-**Vier Helfer** hängen an der alten Waage:
-
-| Helfer | Typ | Konfiguration |
+| | vorher | nachher |
 |---|---|---|
-| `input_boolean.stockwaage_wachhalten` | input_boolean | geräteunabhängig, nur Namensfrage |
-| `01M08F0DAF4RPTXSGKXM4MBA3C` „Gewichtsänderung" | derivative | Quelle `sensor.stockwaage_gewicht`, Fenster 6 h, kg/d, round 2 |
-| `01M08F0MCN7Z80DNQTZ8KY05EF` „Gewichtsverlust kurz" | derivative | Quelle `sensor.stockwaage_gewicht`, Fenster 20 min, kg/h, round 2 |
-| `01M08F0SYDFEHG4RPWZBPQR28A` „Tagesbilanz" | statistics | Quelle `sensor.stockwaage_gewicht`, `change`, 24 h, 2000 Samples |
+| MAC | `f8:b3:b7:49:59:7c` | `20:50:0d:ca:b2:bc` |
+| Firmware gebaut | 24.08.2026 12:11 | 28.08.2026 20:14 |
+| Config-Entry | `01M08HH8349N52K2MR1RABCV3T` | derselbe |
+| Entities | 29 × `stockwaage_*` | dieselben 29 |
 
-Die drei Rechenhelfer laufen ins Leere, sobald `sensor.stockwaage_gewicht`
-nicht mehr aktualisiert wird. Ihre Quelle ist über den Options-Flow
-umzuhängen. Umbenennen geht dabei **nicht** mit: Options-Flows nehmen den
-Schlüssel `name` nicht an. Wer konsistente `bienenwaage_*`-IDs will, benennt
-zusätzlich über die Entity-Registry um — das erhält die Historie, anders als
-Löschen und Neuanlegen.
+Die Regel dahinter, und sie gilt für jeden weiteren Boardwechsel:
 
-Für die Historie gilt der Vorbehalt aus `CLAUDE.md`: ein Gewichtsverlauf ist
-nur innerhalb **einer** Kalibrierung vergleichbar. Beim Umhängen der Quelle
-läuft die alte und die neue Waage in derselben Reihe — für die beiden
-Ableitungen ist das verkraftbar (ein Sprung an der Nahtstelle, danach wieder
-sauber), für einen Absolutverlauf wäre es das nicht.
+> **ESPHome-Config-Entries hängen am Gerätenamen, nicht an der Hardware.**
+> Bleibt `name:` gleich, übernimmt neue Hardware die bestehende Identität
+> mitsamt allen Entity-IDs — HA tauscht nur MAC und IP. Ein Boardwechsel
+> allein erzeugt **keine** neuen Entities.
 
-## 5. Offene Punkte
+Warum die mDNS-Ankündigung trotzdem `bienenwaage` lautete, ließ sich in dieser
+Sitzung nicht abschließend klären; der Zugriff auf die Add-on-Dateien fehlt
+(siehe Punkt 5). Für das Ergebnis ist es ohne Belang: maßgeblich ist der Name,
+den das Gerät über die API meldet, und der war `stockwaage`.
 
-- **`bienenwaage.yaml` ist nicht im Repo.** Sie konnte in dieser Sitzung auch
-  nicht geholt werden: der MCP-Token hat keinen Supervisor-Zugriff
-  (`/addons` → *Unauthorized*), damit ist weder die Add-on-Dateiliste noch die
-  WebSocket-Schnittstelle des Device Builders erreichbar. Die Datei muss von
-  Hand eingecheckt werden, sonst beschreibt das Repo dauerhaft ein Gerät, das
-  es nicht mehr gibt.
-- **`waage-eg.yaml` beschreibt Hardware, die nicht mehr läuft.** Der zugehörige
-  Config-Entry „Waage" steht in HA auf `unavailable`. Entweder als Historie
-  kennzeichnen oder entfernen.
-- **Board-Typ des neuen Geräts unbekannt**, bis die Adoption durch ist.
-- Die Pin-Belegung in `waage-eg.yaml` (D1-Mini-Notation) passt nicht mehr zu
-  einem ESP32. Der Durchsicht-Taster liegt laut Dashboard-Text inzwischen auf
-  GPIO34 mit externem 10-kΩ-Pull-up.
+**Nebenbefund:** Die Bestätigung über die Oberfläche war vorher an der
+Namensauflösung gescheitert, nicht am Schlüssel —
+`Timeout while resolving IP address for ['bienenwaage.local']`. Alle anderen
+ESPHome-Geräte dieser Installation werden über feste IPs angesprochen. Über
+`192.168.1.115` lief es sofort durch.
+
+## 2. Was daraus folgte
+
+Weil das Dashboard bereits auf die richtigen, lebenden Entities zeigte, war
+nichts kaputt — es gab technisch nichts umzuhängen. Die gewünschte Benennung
+war damit kein Repoint mehr, sondern ein Rename, und das ist die Operation,
+vor der `CLAUDE.md` warnt.
+
+Gewählt wurde: **nur in der HA-Registry umbenennen, die ESPHome-YAML
+unangetastet lassen.** Begründung:
+
+- Ein `entity_id`-Rename erhält die Historie samt Langzeitstatistik
+  (HA ≥ 2022.4 zieht die `statistic_id` mit).
+- Registry-Namen gewinnen gegen die von der Integration vorgeschlagenen. Ein
+  erneuter Flash macht die Umbenennung deshalb **nicht** rückgängig.
+- Der Weg über `geraete_name`/`anzeige_name` in der YAML hätte HA neue
+  Entities anlegen lassen und die bisherige Messreihe an toten IDs hängen
+  lassen — genau der dokumentierte Schadensfall.
+
+## 3. Was geändert wurde
+
+**Gerät:** „Stockwaage" → „Bienenwaage" (`name_by_user`). Damit ziehen die
+Anzeigenamen aller Geräte-Entities automatisch mit — aus „Stockwaage Gewicht"
+wird „Bienenwaage Gewicht".
+
+**26 ESPHome-Entities** von `stockwaage_*` auf `bienenwaage_*`. Zwei davon
+trugen zusätzlich einen Area-Präfix, der bei den übrigen 24 fehlte; er wurde
+bei der Gelegenheit entfernt:
+
+| alt | neu |
+|---|---|
+| `binary_sensor.garten_stockwaage_wachhalten_schalter` | `binary_sensor.bienenwaage_wachhalten_schalter` |
+| `switch.garten_stockwaage_hx711_versorgung` | `switch.bienenwaage_hx711_versorgung` |
+
+**Drei Rechenhelfer.** Erst die Quelle über den Options-Flow auf
+`sensor.bienenwaage_gewicht` umgehängt, dann die entity_id umbenannt. Die
+Reihenfolge ist nicht beliebig: Entity-Registry-Renames aktualisieren die im
+Config-Entry gespeicherte Quelle **nicht**, der Helfer zeigte sonst dauerhaft
+auf eine tote ID.
+
+| Helfer | Typ | Fenster |
+|---|---|---|
+| `sensor.bienenwaage_gewichtsanderung` | derivative | 6 h → kg/d |
+| `sensor.bienenwaage_gewichtsverlust_kurz` | derivative | 20 min → kg/h |
+| `sensor.bienenwaage_tagesbilanz` | statistics `change` | 24 h |
+
+Anzeigenamen wurden dabei über die Registry gesetzt, weil Options-Flows den
+Schlüssel `name` nicht annehmen.
+
+**`input_boolean.stockwaage_wachhalten`** → `input_boolean.bienenwaage_wachhalten`.
+
+**Dashboard `bienen-stockwaage-esp32`:** alle 47 Referenzen, Titel jetzt
+„Bienenwaage". Die `url_path` bleibt — sie lässt sich nicht ändern, damit
+bleiben Sidebar-Eintrag und Lesezeichen heil. Erfasst wurden neben den
+`entity:`-Feldern auch die vier View-Badges, die `entities`-Listen der Graph-
+und Entities-Karten und die Jinja2-Ausdrücke in fünf Markdown-Karten. Badges
+und Templates hängen neben den Karten, nicht darin; eine kartenorientierte
+Suche übersieht sie.
+
+## 4. Prüfung
+
+Nach dem Verfahren aus `references/safe-refactoring.md`: erst alle Konsumenten
+suchen, ändern, danach auf Reste prüfen.
+
+- Konsumenten vorher: 47 Dashboard-Referenzen, 4 Helfer. **Keine**
+  Automationen, Skripte oder Szenen — die vier in `waage-eg-notes.md`
+  beschriebenen Automationen existieren nicht mehr.
+- Dashboard-Suche nach `stockwaage` nachher: **0 Treffer.**
+- `input_boolean.stockwaage_wachhalten` liefert 404, ist also wirklich weg.
+- Alle neuen IDs sind in der State Machine mit korrekten Anzeigenamen.
+
+Verbleibende Nennungen von „Stockwaage" gibt es noch in den **Config-Entry-Titeln**
+der drei Helfer (Einstellungen → Helfer). Das ist kosmetisch: Entity-IDs und
+Anzeigenamen sind umgestellt. Options-Flows nehmen keinen neuen Titel an,
+Umbenennen ginge dort nur über Löschen und Neuanlegen — und das kostete die
+Historie. Bewusst so gelassen.
+
+## 5. Zustand des neuen Geräts
+
+Verbunden seit 21:11:59. **Die Kalibrierung steht auf den Platzhaltern:**
+
+| Größe | Wert | Bewertung |
+|---|---|---|
+| Kalibrierfaktor | `3500.0` | Platzhalter — erwartet werden −18.000 bis −21.000 |
+| Kalibriert bei | leer | Temperaturkompensation ist damit **stumm aus** |
+| Gewicht | `unknown` | Folge der fehlenden Kalibrierung |
+| Rohwert | −717.422,69 | plausibel, HX711 liefert |
+| WLAN-Signal | −76 dBm | schwächer als am alten Board (−67) |
+
+Bei einem neuen Board mit frischem NVS ist das erwartbar. **Beide
+Kalibrierschritte fahren, nicht nur den Referenzpunkt** — der Faktor des alten
+Boards (−20.780,66 bei 22,5 °C, kalibriert mit 33,62 kg) gilt hier nicht.
+
+Die beiden Ableitungen stehen bis dahin auf `unavailable`, weil ihre Quelle
+`unknown` ist. Das löst sich mit der Kalibrierung von selbst.
+
+`binary_sensor.bienenwaage_wachhalten_schalter` steht auf **an** — der
+Kippschalter an der Hardware ist umgelegt, das Gerät geht nicht in den
+Tiefschlaf. Praktisch fürs Kalibrieren, aber danach umlegen, sonst läuft der
+Akku leer.
+
+## 6. Offene Punkte
+
+- **`bienenwaage.yaml` ist nicht im Repo.** Sie konnte auch nicht geholt
+  werden: der MCP-Token hat keinen Supervisor-Zugriff (`/addons` →
+  *Unauthorized*), damit sind weder die Add-on-Dateiliste noch die
+  WebSocket-Schnittstelle des Device Builders erreichbar. Von Hand einchecken,
+  sonst beschreibt das Repo dauerhaft ein Gerät, das es nicht mehr gibt.
+- **Die Umbenennung lebt nur in der HA-Registry.** Die YAML sagt weiterhin
+  `stockwaage`. Das ist stabil und überlebt Flashes, aber wer nur die YAML
+  liest, findet den Namen nicht wieder. Beim nächsten Anfassen der Datei einen
+  Kommentar hinterlassen.
+- **`waage-eg.yaml` beschreibt Hardware, die nicht mehr läuft** — der
+  Config-Entry „Waage" steht auf `unavailable`. Kennzeichnen oder entfernen.
+- Die Pin-Belegung in `waage-eg.yaml` ist D1-Mini-Notation und passt nicht zu
+  einem ESP32. Der Durchsicht-Taster liegt laut Dashboard-Text auf GPIO34 mit
+  externem 10-kΩ-Pull-up.
+- Das WLAN-Signal am neuen Standort im Auge behalten.
