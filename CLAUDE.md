@@ -9,17 +9,31 @@ Commit-Messages. Das ist durchgehend so und soll so bleiben.
 
 ## Worum es geht
 
-ESPHome-Bienenstockwaage (ESP8266 D1 Mini + HX711 + 4 Wägezellen), angebunden an
-Home Assistant. **Ein Gerät läuft produktiv** (`waage-eg`) und sammelt seit
-Wochen eine durchgehende Messreihe; zwei weitere Stock-Dateien sind vorbereitet,
-aber ohne Hardware.
+ESPHome-Bienenstockwaage (ESP32 DOIT DevKit V1 + HX711 + 4 Wägezellen),
+angebunden an Home Assistant. **Ein Gerät läuft produktiv** — `bienenwaage.yaml`,
+in ESPHome und HA unter dem Gerätenamen `stockwaage` geführt.
+
+Seit dem 28.08.2026 ist es das einzige. Die ESP8266-Dateien `waage-eg.yaml`,
+`waage-stock2.yaml` und `waage-stock3.yaml` sind entfernt, ebenso der
+`esp8266:`-Block aus der Basis. `waage-eg-notes.md` und
+`waage-eg-claude-code-kontext.md` bleiben als **Archiv** stehen: die
+Begründungen darin gelten weiter, die Istwerte nicht.
+
+**Gerätename und Entity-IDs laufen auseinander, und zwar mit Absicht.**
+`geraete_name` steht auf `stockwaage`, die Entities in HA heißen
+`bienenwaage_*`. Umbenannt wurde nur in der HA-Entity-Registry, damit die
+Messreihe erhalten bleibt — `geraete_name` nachzuziehen legt neue Entities an.
+Die einzige Stelle, an der die Firmware umgekehrt eine HA-Entity referenziert,
+ist `entity_id: input_boolean.bienenwaage_wachhalten` in `bienenwaage.yaml`;
+wird der Helfer umbenannt, fällt das Wachhalten über HA stumm aus.
 
 Daraus folgen zwei Dinge, die fast jede Änderung betreffen:
 
-- **Eine Änderung an `packages/waage-basis.yaml` wirkt beim nächsten Flash auf
-  alle Stöcke.** Vorher gegen jeden prüfen.
-- **Ein Flash kann die Kalibrierung kosten** — siehe unten. Das ist kein
-  Randfall, sondern zweimal real passiert.
+- **`packages/waage-basis.yaml` hat nur noch einen Abnehmer**, aber es ist der
+  produktive. Die Aufteilung bleibt trotzdem: das Device-Builder-Add-on listet
+  nur YAML direkt in `/config/esphome/` als flashbares Gerät.
+- **Ein Flash kann die Kalibrierung kosten** — siehe unten. Auf dem ESP32 ist
+  die Hauptursache strukturell entfallen, die Prüfung bleibt.
 
 ## Prüfen ohne Hardware
 
@@ -28,7 +42,7 @@ durch die Egress-Policy gesperrt). Deshalb diese zwei Wege:
 
 ```bash
 pip install esphome                    # zuletzt gegen 2026.6.5 geprüft
-esphome config waage-eg.yaml           # ebenso waage-stock2.yaml, waage-stock3.yaml
+esphome config bienenwaage.yaml
 
 cd tests
 g++ -std=c++17 -Wall -Wextra -O2 waage-temperatur-test.cpp -o test && ./test
@@ -42,14 +56,27 @@ danach wieder löschen).
 *aufgelösten* Konfiguration, nicht das Lesen der YAML:
 
 ```bash
-esphome config waage-eg.yaml | sed 's/\x1b\[[0-9;]*m//g' > vorher.txt
+esphome config bienenwaage.yaml | sed 's/\x1b\[[0-9;]*m//g' > vorher.txt
 # ... Änderung ...
-esphome config waage-eg.yaml | sed 's/\x1b\[[0-9;]*m//g' > nachher.txt
+esphome config bienenwaage.yaml | sed 's/\x1b\[[0-9;]*m//g' > nachher.txt
 diff vorher.txt nachher.txt
 ```
 
 Damit lässt sich belegen, dass Entity-Namen und Globals unangetastet bleiben.
 Das ANSI-Entfernen ist nötig, sonst rauscht der Diff über maskierte Secrets.
+
+**Der Diff ist nicht deterministisch.** Am 28.08.2026 festgestellt: zwei Läufe
+von `esphome config` über denselben, unveränderten Baum liefern
+unterschiedliche Ausgaben — die Schlüssel `tag` und `level` in den
+`logger.log`-Aktionen tauschen die Reihenfolge. Das sind Falschmeldungen. Wer
+sie für eine echte Änderung hält, sucht stundenlang nach nichts.
+
+Deshalb bei jedem Verdacht gegenprüfen, ob das Rauschen ist — zweimal auf
+demselben Baum laufen lassen — oder gleich reihenfolgeunabhängig vergleichen:
+
+```bash
+diff <(sort vorher.txt) <(sort nachher.txt)
+```
 
 Der g++-Test bindet die **echten** Header-Dateien aus `packages/` ein
 (`waage-temperatur.h`, `waage-mittelwert.h`), prüft also den ausgelieferten
@@ -160,8 +187,13 @@ deshalb ist sie mit g++ testbar.
 
 ## Harte Regeln
 
-- **`restore_from_flash: true` nicht entfernen.** Ohne die Zeile landen alle
-  `restore_value`-Globals nur im RTC-RAM und sind bei jedem Stromausfall weg.
+- **`restore_from_flash: true` gilt nur für den ESP8266** und ist am
+  28.08.2026 mit dem `esp8266:`-Block entfallen. Auf dem ESP8266 war die Zeile
+  zwingend: ohne sie landeten alle `restore_value`-Globals nur im RTC-RAM und
+  waren bei jedem Stromausfall weg. Auf dem ESP32 gibt es keine Entsprechung
+  und es braucht keine — dort bekommt jedes Global einen eigenen NVS-Schlüssel
+  im Flash. **Wer wieder ein ESP8266-Gerät anlegt, muss beides zurückholen**,
+  und zwar in dessen Gerätedatei, nicht in der Basis.
 - **Kein `calibrate_linear`.**
 - **GPIO16 (D0) bleibt frei** — einziger Deep-Sleep-Weckpin des ESP8266.
   D4 (GPIO2) ist Boot-Strapping-Pin und für den geplanten MOSFET reserviert.
@@ -210,7 +242,8 @@ unangetastet gelassen — Faktor vorher und nachher −20.755,91, „Kalibriert 
 | [`README.md`](README.md) | Bedienung: Inbetriebnahme, Kalibrieren, Messintervall, Durchsichtmodus, Temperaturkompensation, Fehlersuche |
 | [`docs/sessionbericht-*.md`](docs) | Chronologie. Wenn eine Entscheidung unbegründet wirkt, steht das Warum meist hier |
 | [`docs/waegezellen-verkabelung.md`](docs/waegezellen-verkabelung.md) | Abschnitt 0 ist der relevante (Halbbrücken-Ring), 1–6 sind Referenz für ein späteres Upgrade |
-| [`docs/deep-sleep-vorbereitung.md`](docs/deep-sleep-vorbereitung.md) | Ausgearbeitet, noch nicht umgesetzt |
+| [`docs/deep-sleep-vorbereitung.md`](docs/deep-sleep-vorbereitung.md) | Abschnitt 9 gilt für den ESP32 und ist umgesetzt; 1–8 sind für den ESP8266 geschrieben und stimmen teils nicht mehr |
+| [`bienenwaage.yaml`](bienenwaage.yaml) | Die geflashte Gerätedatei: Pins, Deep Sleep, HX711-Lastschalter, alle ESP32-Abweichungen von der Basis |
 
 ## Konventionen dieses Repos
 

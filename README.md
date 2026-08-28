@@ -15,9 +15,7 @@ weitere Stöcke ohne Code-Duplizierung dazukommen (siehe
 | [`packages/waage-temperatur.h`](packages/waage-temperatur.h) | Die Formel der Temperaturkompensation, an einer Stelle statt an dreien |
 | [`packages/waage-mittelwert.h`](packages/waage-mittelwert.h) | Mittelwert und Streuung des Messfensters, aus demselben Grund ausgelagert |
 | [`packages/waage-grenzen.h`](packages/waage-grenzen.h) | Plausibilitätsfenster: welches Gewicht überhaupt nach Home Assistant darf |
-| [`waage-eg.yaml`](waage-eg.yaml) | Stock 1 "Waage eG": nur substitutions + package-Include |
-| [`waage-stock2.yaml`](waage-stock2.yaml) | Stock 2, gleiche Bauart |
-| [`waage-stock3.yaml`](waage-stock3.yaml) | Stock 3, gleiche Bauart |
+| [`bienenwaage.yaml`](bienenwaage.yaml) | Das Gerät: substitutions, package-Include und alle ESP32-Abweichungen (Deep Sleep, HX711-Lastschalter, Pins) |
 | [`secrets.yaml.example`](secrets.yaml.example) | Vorlage für die Zugangsdaten (kopieren nach `secrets.yaml`) |
 | [`waage-eg-notes.md`](waage-eg-notes.md) | Projektnotizen: alle Entscheidungen, Anforderungen, offene Punkte |
 | [`docs/waegezellen-verkabelung.md`](docs/waegezellen-verkabelung.md) | Verkabelung der 4 Zellen, Junction-Box, Kaufkriterien |
@@ -97,7 +95,7 @@ Details zur Verdrahtung und zum Rest der Deep-Sleep-Vorbereitung:
 
 1. `secrets.yaml.example` nach `secrets.yaml` kopieren und ausfüllen
    (im ESPHome Device Builder liegt sie unter `/config/esphome/secrets.yaml`)
-2. `waage-eg.yaml` **und den Ordner `packages/`** ins ESPHome-Verzeichnis
+2. `bienenwaage.yaml` **und den Ordner `packages/`** ins ESPHome-Verzeichnis
    legen, kompilieren und flashen. Ohne `packages/` bricht das Kompilieren
    mit einem Fehler zum fehlenden Include ab - die Stock-Datei allein
    enthält keine Logik mehr.
@@ -109,9 +107,7 @@ Die Konfiguration ist in **eine Basis + eine Datei pro Stock** aufgeteilt:
 
 ```
 packages/waage-basis.yaml    komplette Logik, für alle Stöcke identisch
-waage-eg.yaml                Stock 1 - nur substitutions + package-Include
-waage-stock2.yaml            Stock 2
-waage-stock3.yaml            Stock 3
+bienenwaage.yaml             Das Geraet - substitutions, Include, ESP32-Teil
 ```
 
 Die Stock-Dateien liegen bewusst **im Root**, nicht in einem
@@ -130,13 +126,14 @@ Pseudo-Gerät auf.
 
 Alles andere — Filterkette, Kalibrier-Buttons, Durchsichtmodus, Taktgeber —
 kommt aus der Basis und wird nie kopiert. Eine Verbesserung dort wirkt
-nach dem nächsten Flash auf allen Stöcken.
+nach dem nächsten Flash auf allen Stöcken — derzeit ist das genau einer,
+und zwar der produktive.
 
 ### Namensschema
 
-`waage-stock2` / `waage-stock3` sind als Vorgabe eingetragen und
-funktionieren sofort. **Empfehlung für die Praxis: stattdessen den
-Standort verwenden** — `waage-garten`, `waage-streuobst`, `waage-hausecke`.
+Für einen weiteren Stock **den Standort als Namen verwenden** —
+`waage-garten`, `waage-streuobst`, `waage-hausecke` — und nicht
+durchnummerieren.
 
 Grund: `geraete_name` und `anzeige_name` bilden die entity_id in HA
 (`"Waage eG"` + `"Gewicht"` → `sensor.waage_eg_gewicht`). Wird später
@@ -738,9 +735,7 @@ sie abgebrochen sind (`Span nur ... counts`, `Referenzgewicht ungueltig`).
 ## Konfiguration prüfen
 
 ```bash
-esphome config waage-eg.yaml
-esphome config waage-stock2.yaml
-esphome config waage-stock3.yaml
+esphome config bienenwaage.yaml
 ```
 
 Geprüft gegen ESPHome 2026.6.5 - siehe Abschnitt "Validierung" in den
@@ -760,8 +755,8 @@ Bei der Umstellung auf packages wurde die aufgelöste Konfiguration von
 das genauso machen:
 
 ```bash
-esphome config waage-eg.yaml > vorher.txt
+esphome config bienenwaage.yaml > vorher.txt
 # ... Änderung ...
-esphome config waage-eg.yaml > nachher.txt
+esphome config bienenwaage.yaml > nachher.txt
 diff vorher.txt nachher.txt
 ```

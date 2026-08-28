@@ -18,10 +18,11 @@
 # /config/esphome/ als flashbare Geraete - laege die Basis dort, tauchte
 # sie als Pseudo-Geraet auf.
 #
-# Die Basis traegt noch einen esp8266:-Block, den diese Datei per !remove
-# entfernt (unten Punkt 1). Das war noetig, solange beide Geraete
-# dieselbe Basis teilten; jetzt ist es Ballast. Aufloesen ist zulaessig,
-# aber eine bewusste Aufraeumaktion - kein Nebenbei-Edit.
+# Die Basis trug frueher einen esp8266:-Block, den diese Datei per !remove
+# entfernen musste. Am 28.08.2026 aufgeloest: mit dem Abbau der
+# ESP8266-Geraete ist der Block aus der Basis verschwunden, das !remove hier
+# ebenso. Belegt ueber einen Diff der aufgelosten Konfiguration - ausser dem
+# Plattformblock hat sich nichts geaendert.
 #
 # ---------------------------------------------------------------------
 # ACHTUNG - Geraetename und Entity-IDs laufen seit dem 28.08.2026
@@ -96,22 +97,17 @@ substitutions:
   ap_ssid: "Stockwaage Fallback"
 
   # --- Board ---
-  # Hier steht bewusst KEIN board: - anders als man es nach den uebrigen
-  # Stock-Dateien erwarten wuerde. Das Board steht ausgeschrieben im
-  # esp32:-Block weiter unten.
+  # Hier steht bewusst KEIN board: als Substitution. Das Board steht
+  # ausgeschrieben im esp32:-Block weiter unten.
   #
-  # Grund: Die substitution board: existiert in der Basis nur, damit der
-  # dortige esp8266:-Block sie lesen kann. Genau dieser Block wird hier
-  # per !remove entfernt - die Substitution haette also keinen Abnehmer
-  # mehr ausser dem esp32:-Block in dieser Datei selbst. Ein Wert, der in
-  # derselben Datei gesetzt und gelesen wird, gehoert nicht durch eine
-  # Substitution: er waere dann nur noch schwerer zu finden, und zwar an
-  # der einen Stelle, an der man bei einer Board-Portierung zuerst
-  # nachsieht.
+  # Grund: Es gaebe nur einen einzigen Leser, naemlich den esp32:-Block in
+  # dieser Datei selbst. Ein Wert, der in derselben Datei gesetzt und
+  # gelesen wird, gehoert nicht durch eine Substitution - er waere dann nur
+  # schwerer zu finden, und zwar an genau der Stelle, an der man bei einer
+  # Board-Portierung zuerst nachsieht.
   #
-  # Die Vorgabe d1_mini aus der Basis bleibt damit unbenutzt stehen. Das
-  # ist folgenlos - sie hat nach dem !remove niemanden mehr, der sie
-  # liest.
+  # Die Basis hatte frueher eine Vorgabe board: d1_mini fuer ihren
+  # esp8266:-Block. Beides ist am 28.08.2026 entfallen.
 
   # --- Pins (Anschlussplan ESP32 DOIT DevKit V1) ---
   #
@@ -285,12 +281,12 @@ packages:
 # Kalibrier-Sperre, Durchsichtmodus, Taktgeber - kommt unveraendert aus
 # packages/waage-basis.yaml.
 
-# --- 1) Plattformblock tauschen ---
-# Die Basis bringt einen esp8266:-Block mit. Beide Plattformbloecke
-# gleichzeitig gehen nicht, und ein Package-Wert laesst sich nur
-# ueberschreiben, nicht loeschen - dafuer gibt es !remove.
-esp8266: !remove
-
+# --- 1) Plattform ---
+# Bis zum 28.08.2026 stand hier "esp8266: !remove": die Basis brachte einen
+# esp8266:-Block mit, beide Plattformbloecke gleichzeitig gehen nicht, und ein
+# Package-Wert laesst sich nur ueberschreiben, nicht loeschen. Mit dem Abbau
+# der ESP8266-Geraete ist der Block aus der Basis verschwunden - das !remove
+# hat damit keinen Abnehmer mehr und ist entfallen.
 esp32:
   # NodeMCU-32S ist mit diesem Board-Profil kompatibel: beide sind
   # ESP32-WROOM-32 mit 4 MB Flash.

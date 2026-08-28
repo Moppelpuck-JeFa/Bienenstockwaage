@@ -6,7 +6,7 @@
 # Wägezellen-Template, Durchsichtmodus und den Taktgeber.
 #
 # Sie wird NICHT direkt geflasht. Geflasht werden die Stock-Dateien im
-# Repo-Root (waage-eg.yaml, waage-stock2.yaml, ...); jede davon setzt nur
+# Repo-Root (derzeit nur bienenwaage.yaml); jede davon setzt nur
 # ihre substitutions und bindet diese Datei als package ein.
 #
 # WICHTIG - warum die Stock-Dateien im Root liegen und diese hier nicht:
@@ -35,11 +35,9 @@ substitutions:
   anzeige_name: "Waage unbenannt"
   ap_ssid: "Waage Fallback"
 
-  # --- Board ---
-  board: d1_mini
-
   # --- Pins ---
-  # Vorgabe ist die Verdrahtung von waage-eg; ein Stock mit abweichender
+  # Vorgabe ist die Verdrahtung von waage-eg (ESP8266, abgebaut); ein Stock
+  # mit abweichender
   # Verdrahtung überschreibt einzelne Werte in seiner Datei.
   # D0/GPIO16 kommt hier bewusst NIRGENDS vor: das ist der einzige Pin, über
   # den der ESP8266 aus dem Deep Sleep aufwachen kann, und er bleibt für den
@@ -149,23 +147,28 @@ esphome:
     # Plausibilitaetsfenster des Gewichts, ebenfalls testbar gehalten
     - packages/waage-grenzen.h
 
-esp8266:
-  board: ${board}
-  # ZWINGEND für diese Konfiguration. Ohne diese Zeile legt ESPHome auf dem
-  # ESP8266 alle "restore_value"-Werte NUR ins RTC-RAM. Das übersteht einen
-  # Reboot, ist aber bei jedem Stromausfall/Steckerziehen weg - die komplette
-  # Kalibrierung wäre dann auf die initial_value-Platzhalter zurückgesetzt und
-  # die Waage zeigt Unsinn. Erst mit restore_from_flash landen die Werte
-  # wirklich dauerhaft im Flash.
-  # (Flash-Verschleiß ist hier unkritisch: Kalibrierwerte und die beiden
-  # Number-Entities ändern sich nur, wenn man sie von Hand anfasst.)
-  restore_from_flash: true
+# KEIN Plattformblock hier. Der esp8266:-Block ist am 28.08.2026 entfallen,
+# zusammen mit den ESP8266-Stock-Dateien - es gibt kein Gerät dieser Bauart
+# mehr. Die Plattform steht jetzt dort, wo auch das Board steht: in
+# bienenwaage.yaml. Bis dahin trug diese Datei einen esp8266:-Block, den
+# bienenwaage.yaml per "esp8266: !remove" wieder herausnehmen musste.
+#
+# Mit ihm ist "restore_from_flash: true" entfallen. Das war auf dem ESP8266
+# ZWINGEND - ohne die Zeile lagen alle restore_value-Werte nur im RTC-RAM und
+# waren bei jedem Stromausfall weg, die Kalibrierung fiel auf die
+# initial_value-Platzhalter zurück. Auf dem ESP32 gibt es dazu keine
+# Entsprechung und es wird auch keine gebraucht: dort bekommt jedes Global
+# einen eigenen NVS-Schlüssel im Flash. Die Herleitung steht ausführlich in
+# bienenwaage.yaml, Punkt 2.
+#
+# WER WIEDER EIN ESP8266-GERÄT ANLEGT, muss beides zurückholen - der Block
+# gehört dann in dessen Gerätedatei, nicht hierher.
 
 # WLAN-Zugangsdaten - in secrets.yaml eintragen
 #
 # Die !secret-Verweise hier lösen gegen die secrets.yaml im Verzeichnis der
 # GEFLASHTEN Stock-Datei auf, nicht gegen dieses Unterverzeichnis. secrets.yaml
-# gehört also weiterhin neben waage-eg.yaml (/config/esphome/secrets.yaml) und
+# gehört also weiterhin neben bienenwaage.yaml (/config/esphome/secrets.yaml) und
 # NICHT nach packages/. Nebenwirkung: "esphome config packages/waage-basis.yaml"
 # direkt aufzurufen schlägt mit "packages/secrets.yaml nicht gefunden" fehl -
 # das ist erwartet, geprüft werden immer die Stock-Dateien.
