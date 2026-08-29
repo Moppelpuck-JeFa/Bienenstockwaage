@@ -920,7 +920,59 @@ Dashboard-Umbau der Punkte 10 bis 13 sind Notbehelfe gegen eine Verbindung,
 die zu schwach ist. **Der Repeater ist ab jetzt der erste Punkt, nicht der
 letzte.**
 
-## 16. Offene Punkte
+## 16. Zwei Optimierungen, die das Gerät selbst vorgeschlagen hat
+
+Im Log nach dem Start am 29.08.2026:
+
+```
+[W][app:198] Chip rev >= 3.0 detected. Set minimum_chip_revision: "3.1"
+             under esp32 > framework > advanced to reduce binary size
+[W][app:198] Bootloader supports SRAM1 as IRAM (+40KB).
+             Set sram1_as_iram: true under esp32 > framework > advanced
+```
+
+Beide gesetzt. Wichtig dabei: **das sind keine allgemeinen Empfehlungen,
+sondern Messwerte dieses Geräts.** ESPHome liest die Hardware aus
+(`core/application.cpp` ab Zeile 155): `esp_chip_info()` für die Revision,
+`esp_ota_get_bootloader_description()` für den Bootloader. Die `3.1` ist die
+tatsächliche Revision dieses Chips.
+
+**`minimum_chip_revision: "3.1"`** lässt die Umgehungen für ältere
+Silizium-Revisionen aus dem Binärbild. Ohne PSRAM — wie hier — spart das
+Flash; mit PSRAM wären es rund 10 KB IRAM.
+
+**`sram1_as_iram: true`** gibt die SRAM1-Region als IRAM frei, +40 KB. Sie
+war früher dem Bootloader vorbehalten und geht erst mit einem Bootloader ab
+ESP-IDF 5.1.
+
+### Warum der Hinweis im Log zugleich die Freigabe ist
+
+`sram1_as_iram` mit einem alten Bootloader ist ein harter Ziegelstein: das
+Bild startet nicht mehr, nur ein USB-Flash holt das Gerät zurück. ESPHome
+schlägt die Option deshalb **nur** vor, wenn es den laufenden Bootloader
+gelesen hat und der modern genug ist. Der Kommentar an der Stelle sagt das
+ausdrücklich:
+
+> We intentionally do NOT mention sram1_as_iram when the bootloader is too
+> old. […] Two flashes is a better outcome than a bricked device.
+
+Steht im Log stattdessen „Bootloader too old", darf die Zeile nicht gesetzt
+werden — dann erst einmal über USB flashen. **Ein OTA erneuert den
+Bootloader nicht.** Der hier vorhandene stammt vom USB-Flash bei der
+Inbetriebnahme des Boards am 28.08.2026.
+
+### Der Preis: die Firmware ist jetzt an diese Hardware gebunden
+
+Ein Bild mit `minimum_chip_revision: "3.1"` startet auf einem älteren ESP32
+**nicht**. Das Board wurde in diesem Projekt bereits einmal getauscht; wer
+das wieder tut, prüft die Revision des neuen Chips im Log und senkt den Wert
+notfalls. Erlaubt sind `0.0`, `1.0`, `1.1`, `2.0`, `3.0` und `3.1`
+(`esp32/__init__.py`, `ESP32_CHIP_REVISIONS`).
+
+Geprüft: der Diff der aufgelösten Konfiguration zeigt genau diese zwei
+Zeilen.
+
+## 17. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
@@ -940,6 +992,9 @@ letzte.**
   Alternative: die mDNS-Auflösung ist hier nachweislich unzuverlässig, daran
   scheiterte schon die erste Adoption.
 - **Kippschalter wieder umlegen**, sonst gibt es keinen Tiefschlaf.
+- **Bei einem Boardtausch die Chip-Revision pruefen.** `minimum_chip_revision:
+  "3.1"` bindet die Firmware an diese Hardware (Punkt 16); auf einem aelteren
+  ESP32 startet das Bild nicht.
 - **Kein Supervisor-Zugriff über den MCP-Server.** `/addons` antwortet
   `Unauthorized`, und auch der Umweg über den HA-Core-Proxy `supervisor/api`
   wird abgewiesen. Damit sind Add-on-Dateien und die WebSocket-Schnittstelle

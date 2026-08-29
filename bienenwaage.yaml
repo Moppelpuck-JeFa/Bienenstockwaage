@@ -297,6 +297,49 @@ esp32:
     # Geraet nicht unbemerkt auf eine andere Toolchain schiebt.
     type: esp-idf
 
+    # --- Zwei Optimierungen, die das Geraet selbst vorgeschlagen hat ---
+    #
+    # Am 29.08.2026 im Log nach dem Start:
+    #
+    #   [W][app:198] Chip rev >= 3.0 detected. Set minimum_chip_revision: "3.1"
+    #                under esp32 > framework > advanced to reduce binary size
+    #   [W][app:198] Bootloader supports SRAM1 as IRAM (+40KB).
+    #                Set sram1_as_iram: true under esp32 > framework > advanced
+    #
+    # Beide Hinweise sind GERAETESPEZIFISCH, nicht allgemein. ESPHome liest
+    # dafuer die echte Hardware aus (core/application.cpp ab Zeile 155):
+    # esp_chip_info() fuer die Revision, esp_ota_get_bootloader_description()
+    # fuer den Bootloader. Die Zahl "3.1" ist also die tatsaechliche Revision
+    # dieses Chips, nicht ein Richtwert.
+    advanced:
+      # Laesst die Umgehungen fuer aeltere Silizium-Revisionen aus dem
+      # Binaerbild. Auf einem Chip mit PSRAM waeren es ~10 KB IRAM; ohne
+      # PSRAM - wie hier - "nur" Flash.
+      #
+      # ACHTUNG, DAS BINDET DIE FIRMWARE AN DIESE HARDWARE. Ein Bild mit
+      # minimum_chip_revision: "3.1" startet auf einem aelteren ESP32 NICHT.
+      # Das Board wurde in diesem Projekt bereits einmal getauscht; wer das
+      # wieder tut, muss die Revision des neuen Chips im Log pruefen und
+      # diesen Wert notfalls senken. Erlaubt sind 0.0, 1.0, 1.1, 2.0, 3.0
+      # und 3.1 (esp32/__init__.py, ESP32_CHIP_REVISIONS).
+      minimum_chip_revision: "3.1"
+
+      # Gibt die SRAM1-Region als IRAM frei, +40 KB. Das war frueher fuer
+      # den Bootloader reserviert und geht erst mit einem Bootloader ab
+      # ESP-IDF 5.1.
+      #
+      # DER HINWEIS IM LOG IST DIE FREIGABE. ESPHome schlaegt die Option
+      # ausdruecklich NUR vor, wenn es den laufenden Bootloader gelesen hat
+      # und der modern genug ist - der Kommentar an der Stelle nennt den
+      # Grund: mit einem alten Bootloader startet das Bild nicht mehr und
+      # nur ein USB-Flash holt das Geraet zurueck. Steht im Log
+      # stattdessen "Bootloader too old", dann diese Zeile NICHT setzen,
+      # sondern einmal ueber USB flashen.
+      #
+      # Ein OTA erneuert den Bootloader nicht. Der hier vorhandene stammt
+      # vom USB-Flash bei der Inbetriebnahme des Boards am 28.08.2026.
+      sram1_as_iram: true
+
 # --- 2) restore_from_flash hat auf dem ESP32 KEINE Entsprechung ---
 # und braucht auch keine. Das ist kein Weglassen aus Bequemlichkeit,
 # sondern ein echter Plattformunterschied - nachgesehen im Quelltext von

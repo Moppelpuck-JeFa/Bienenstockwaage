@@ -195,6 +195,12 @@ deshalb ist sie mit g++ testbar.
   im Flash. **Wer wieder ein ESP8266-Gerät anlegt, muss beides zurückholen**,
   und zwar in dessen Gerätedatei, nicht in der Basis.
 - **Kein `calibrate_linear`.**
+- **`minimum_chip_revision: "3.1"` bindet die Firmware an dieses Board.** Auf
+  einem älteren ESP32 startet das Bild nicht. Bei einem Boardtausch die
+  Revision im Startlog prüfen und den Wert notfalls senken. Dasselbe gilt für
+  `sram1_as_iram: true`: erlaubt ist es nur, solange das Gerät im Log
+  „Bootloader supports SRAM1 as IRAM" meldet — bei „Bootloader too old" erst
+  einmal über USB flashen, ein OTA erneuert den Bootloader nicht.
 - **GPIO16 (D0) bleibt frei** — einziger Deep-Sleep-Weckpin des ESP8266.
   D4 (GPIO2) ist Boot-Strapping-Pin und für den geplanten MOSFET reserviert.
 - **`geraete_name` + `anzeige_name` + die `name:`-Felder bilden die entity_id in
