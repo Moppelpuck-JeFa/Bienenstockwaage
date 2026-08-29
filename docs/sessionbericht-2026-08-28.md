@@ -844,7 +844,83 @@ enthalten und muss `id: ota_esphome` haben.
 5. Danach wirkt wieder `input_boolean.bienenwaage_wachhalten`. Die Brücke und
    ihre beiden Karten in der Übersicht löschen.
 
-## 15. Offene Punkte
+## 15. Das WLAN wird zum Hauptproblem
+
+Meldung: „der esp32 verbindet sich nicht über wlan". Der Blick nach Home
+Assistant zeigte ein anderes Bild als erwartet — das Gerät war in dem Moment
+**verbunden**, Betriebszeit 90 s, Gewicht 35,5 kg gerade veröffentlicht. Der
+Befund steckte in der Zahl daneben.
+
+### Die Feldstärke ist die Ursache
+
+| Zeit | WLAN-Signal |
+|---|---|
+| 12:09 | −78 dBm |
+| 12:21 | −76 dBm |
+| **14:51** | **−84 dBm** |
+
+Zwischen 12:21 und 14:51 kam **kein einziger Messwert**, obwohl das
+Wachhalten an war und das Messintervall auf 60 min steht. Mindestens ein
+Weckfenster ist also komplett ausgefallen — das Gerät ist aufgewacht und hat
+sich nicht verbinden können.
+
+−84 dBm liegt unter der Wackelgrenze von −80 dBm, die in der eigenen
+Dashboard-Doku steht. Von −67 dBm am alten Board über −76 und −78 auf jetzt
+−84: die Strecke ist über die Sitzung hinweg schlechter geworden, nicht
+besser. **Das ist ein physikalisches Problem und durch keine YAML-Zeile zu
+beheben** — Repeater, Standort oder Antenne.
+
+### `fast_connect` war der Verstärker — abgeschaltet
+
+Nicht die Ursache, aber es macht aus einer schwachen Strecke eine
+ausfallende. Nachgelesen in `wifi_component.cpp` (2026.6.5),
+`load_fast_connect_settings_` ab Zeile 2229:
+
+```cpp
+params.set_bssid(bssid);
+params.set_channel(fast_connect_save.channel);
+```
+
+`fast_connect` legt **BSSID und Kanal** der letzten erfolgreichen Verbindung
+in NVS ab und verbindet beim nächsten Start **blind genau dorthin, ohne
+Scan**. Erst wenn dieser eine Versuch scheitert, werden weitere
+konfigurierte Netze durchprobiert, und erst danach wird überhaupt gescannt
+(Ablaufdiagramm ab Zeile 118).
+
+Drei Folgen, alle ungünstig an einer schwachen Strecke:
+
+- Das Gerät nagelt sich auf den zuletzt benutzten Accesspoint fest, auch
+  wenn ein näherer erreichbar wäre.
+- Wechselt die FRITZ!Box den Kanal — das macht sie von allein —, ist der
+  gespeicherte Kanal falsch und der erste Versuch scheitert zwangsläufig.
+- Jeder Fehlversuch frisst Zeit aus den 200 s Wachzeit, bevor überhaupt
+  gescannt wird.
+
+Die ursprüngliche Begründung („spart den Scan, bares Guthaben in der
+Tagesbilanz") trug die Voraussetzung als Nebensatz mit sich: *„setzt voraus,
+dass sich Kanal und BSSID nicht ständig ändern"*. Genau die ist hier nicht
+erfüllt.
+
+**Und die Rechnung kippt auch für den geplanten Akkubetrieb.** Ein Scan
+kostet ein bis zwei Sekunden. Ein verpasstes Weckfenster kostet die vollen
+200 s Funk und HX711 — und liefert nichts. Zwischen 12:21 und 14:51 ist
+genau das passiert.
+
+Gesetzt: `fast_connect: false`. Der Diff der aufgelösten Konfiguration zeigt
+diese eine Zeile und sonst nichts.
+
+> Nebenbei: die gespeicherten Werte liegen in NVS und überleben ein OTA. Mit
+> `false` werden sie nicht mehr gelesen, es bleibt also nichts Altes aktiv.
+
+### Was das für die Reihenfolge bedeutet
+
+Solange die Strecke bei −84 dBm liegt, ist jeder weitere Ausbau am Gerät
+Arbeit auf Sand: das Wachhalten, die Haltesensoren und der ganze
+Dashboard-Umbau der Punkte 10 bis 13 sind Notbehelfe gegen eine Verbindung,
+die zu schwach ist. **Der Repeater ist ab jetzt der erste Punkt, nicht der
+letzte.**
+
+## 16. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
@@ -871,9 +947,11 @@ enthalten und muss `id: ota_esphome` haben.
 - **Helfer-Titel.** Die drei Rechenhelfer heißen in Einstellungen → Helfer
   weiterhin „Stockwaage …". Kosmetisch; Umbenennen ginge nur über Löschen und
   Neuanlegen und kostete die Historie.
-- **Funkstrecke verbessern.** Zuletzt −78 dBm gegenüber −67 dBm
-  am alten Board. Unter −80 dBm wird es laut eigener Dashboard-Doku wackelig,
-  und schon jetzt kostet es den sauberen Abschied vor dem Einschlafen (Punkt 9).
+- **Funkstrecke verbessern — inzwischen der erste Punkt, nicht der letzte.**
+  −84 dBm (Punkt 15), gegenüber −67 dBm am alten Board. Die eigene
+  Wackelgrenze von −80 dBm ist unterschritten, ganze Weckfenster fallen aus,
+  und es kostet weiterhin den sauberen Abschied vor dem Einschlafen
+  (Punkt 9). `fast_connect: false` mildert, heilt aber nicht.
   Standort, Antennenausrichtung oder ein Repeater in Reichweite.
 - **Die Entities gehen weiterhin in den Schlafphasen auf `unavailable`.**
   `subscribe_logs: false` hat nicht gereicht (Punkt 9). Das Dashboard fängt es

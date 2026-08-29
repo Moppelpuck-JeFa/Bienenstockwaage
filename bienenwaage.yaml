@@ -356,10 +356,43 @@ esp32:
 # ausdruecklich nicht Gegenstand dieser Portierung.
 wifi:
   power_save_mode: NONE
-  # Spart im Weckfenster den WLAN-Scan - der groesste Einzelposten beim
-  # Verbindungsaufbau und damit bares Guthaben in der Tagesbilanz.
-  # Setzt voraus, dass sich Kanal und BSSID nicht staendig aendern.
-  fast_connect: true
+  # --- fast_connect: am 29.08.2026 ABGESCHALTET ---
+  #
+  # Stand vorher auf true, mit der Begruendung: spart im Weckfenster den
+  # WLAN-Scan, den groessten Einzelposten beim Verbindungsaufbau, und ist
+  # damit bares Guthaben in der Tagesbilanz. Die Voraussetzung stand als
+  # Nebensatz dabei - "setzt voraus, dass sich Kanal und BSSID nicht
+  # staendig aendern" - und genau die ist hier nicht erfuellt.
+  #
+  # Was fast_connect wirklich tut (wifi_component.cpp, 2026.6.5,
+  # load_fast_connect_settings_ ab Zeile 2229): Es legt BSSID UND KANAL der
+  # letzten erfolgreichen Verbindung in NVS ab und verbindet beim naechsten
+  # Start BLIND genau dorthin, ohne Scan. Erst wenn dieser eine Versuch
+  # scheitert, werden weitere konfigurierte Netze durchprobiert, und erst
+  # danach wird ueberhaupt gescannt.
+  #
+  # Drei Folgen, alle unguenstig an einer schwachen Strecke:
+  #   - Das Geraet nagelt sich auf den zuletzt benutzten Accesspoint fest,
+  #     auch wenn ein naeherer erreichbar waere.
+  #   - Wechselt die FRITZ!Box den Kanal - das macht sie von allein -, ist
+  #     der gespeicherte Kanal falsch und der erste Versuch scheitert
+  #     zwangslaeufig.
+  #   - Jeder Fehlversuch frisst Zeit aus der Wachzeit von 200 s, bevor
+  #     ueberhaupt gescannt wird.
+  #
+  # Die Rechnung kippt damit auch fuer den spaeteren Akkubetrieb: ein Scan
+  # kostet ein bis zwei Sekunden, ein verpasstes Weckfenster kostet die
+  # vollen 200 s Funk und HX711 - und liefert nichts.
+  #
+  # Ausloeser am 29.08.2026: zwischen 12:21 und 14:51 kam kein einziger
+  # Messwert, obwohl das Wachhalten an war, und beim Wiederauftauchen stand
+  # das Signal auf -84 dBm gegenueber -76 dBm zweieinhalb Stunden vorher.
+  #
+  # Das ist ausdruecklich NICHT die Ursache, sondern ein Verstaerker. Die
+  # Ursache ist die Feldstaerke: -84 dBm liegt unter der eigenen
+  # Wackelgrenze von -80 dBm. Das loest nur ein Repeater, ein anderer
+  # Standort oder eine andere Antenne.
+  fast_connect: false
 
   # --- Uploadziel fuer OTA: IP statt mDNS ---
   # use_address aendert am GERAET nichts. Es sagt nur dem uebersetzenden
