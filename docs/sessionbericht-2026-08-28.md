@@ -972,14 +972,79 @@ notfalls. Erlaubt sind `0.0`, `1.0`, `1.1`, `2.0`, `3.0` und `3.1`
 Geprüft: der Diff der aufgelösten Konfiguration zeigt genau diese zwei
 Zeilen.
 
-## 17. Offene Punkte
+## 17. Nach dem Flash: die Nachprüfung
+
+Der Flash ist durch. Belegt nicht über eine Meldung, sondern über eine
+Entity, die **verschwunden** ist: `binary_sensor.bienenwaage_wachhalten_schalter`
+gibt es in Home Assistant nicht mehr. Sie kann nur wegfallen, wenn das Gerät
+sie nicht mehr meldet — also läuft die Firmware ohne den für den GPIO33-Test
+entfernten `binary_sensor`.
+
+### Die beiden Pflichtprüfungen
+
+| Prüfung | Wert | Bewertung |
+|---|---|---|
+| Kalibrierfaktor | **−14.081,15** | unverändert seit 12:09, **nicht** auf 3.500 zurückgefallen |
+| „Kalibriert bei" | **20,9 °C** | nicht leer, Temperaturkompensation arbeitet |
+
+**Damit ist es der zweite bestätigte Datenpunkt** für die Aussage in
+CLAUDE.md, dass ein Flash auf dem ESP32 die Kalibrierung nicht kostet — der
+erste war der 12.08.2026. Der Flash brachte diesmal zwei neue
+sdkconfig-Optionen und geänderte WLAN-Parameter mit, die Globals blieben
+unangetastet. Zwei Datenpunkte sind immer noch kein Beweis, aber die
+Erklärung über die eigenen NVS-Schlüssel trägt bisher.
+
+### Weitere Messwerte
+
+| Größe | vorher | jetzt |
+|---|---|---|
+| WLAN-Signal | −84 dBm | **−77 dBm** |
+| Rohwert Streuung | 152,0 counts | **56,6 counts** |
+| Gewicht | 35,2 kg | 35,4 kg |
+| Gewicht verworfen | 0 | 0 |
+
+Zur Streuung: 56,6 counts sind rund **2,8 g** gegenüber vorher 7,6 g. Der
+naheliegende Grund ist nicht die Hardware, sondern der Betriebszustand — das
+Gerät läuft jetzt durch, das Messfenster ist also ein volles 60-s-Mittel mit
+eingeschwungenem HX711 statt eines kurzen Weckfensters.
+
+Beim WLAN ist Zurückhaltung angebracht: −77 gegenüber −84 dBm ist eine
+einzelne Messung. Es kann `fast_connect: false` sein, das jetzt den besseren
+Accesspoint wählen darf; es kann genauso gut Schwankung sein. **Der Wert
+liegt weiterhin dicht an der Wackelgrenze**, der Repeater bleibt offen.
+
+### Was das Gerät gerade wach hält — nicht, was man denkt
+
+Betriebszeit 5.033 s bei durchgehender Verbindung seit 15:47, **obwohl
+`input_boolean.bienenwaage_wachhalten` seit 15:25 auf `off` steht.** Wach
+hält es also der Kippschalter am Gehäuse.
+
+Das ist kein Widerspruch zu Punkt 8, sondern dessen Präzisierung:
+
+- **Wachhalten funktioniert** über den Schalter. `wakeup_pin_mode: KEEP_AWAKE`
+  prüft den Pin, während das Gerät **läuft** — und dort ist der interne
+  Pull-up des GPIO-Treibers aktiv.
+- **Wecken funktioniert nicht.** Erst beim Übergang in den Tiefschlaf legt
+  `esp_sleep_enable_ext0_wakeup()` den Pad auf die RTC-Funktion um, wo nur
+  `rtc_gpio_pullup_en()` zählt. Der Pin schwebt, der Schalter wird nicht
+  gelesen.
+
+Der externe 10-kΩ-Widerstand von GPIO33 nach 3V3 bleibt damit offen — er
+fehlt für genau eine Richtung.
+
+### Die OTA-Brücke ist entfernt
+
+`input_boolean.stockwaage_wachhalten` gelöscht, die zugehörige Kachel und
+ihr Erklärtext aus der Übersicht entfernt. Sie hat ihren Zweck erfüllt: ohne
+sie wäre dieser Flash nicht zustande gekommen. Ab jetzt wirkt wieder der
+reguläre Helfer `input_boolean.bienenwaage_wachhalten`, auf den die Firmware
+zeigt.
+
+## 18. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
   Masse steigen.
-- **Flashen, dann die Brücke löschen.** Ablauf in Punkt 14.6. Solange
-  `input_boolean.stockwaage_wachhalten` existiert, ist es der einzige Weg,
-  das Gerät wach zu halten — beide anderen sind aus (Punkt 14.1).
 - **`use_address` nachziehen, falls die Lease wandert.** Steht fest auf
   `192.168.1.115`. Erledigt sich mit der Lease-Reservierung.
 - **10 kΩ von GPIO33 nach 3V3 nachrüsten**, siehe Punkt 8. Hardware, unabhängig
@@ -991,7 +1056,8 @@ Zeilen.
   Reservierung wandert die Adresse wieder. `bienenwaage.local` ist keine
   Alternative: die mDNS-Auflösung ist hier nachweislich unzuverlässig, daran
   scheiterte schon die erste Adoption.
-- **Kippschalter wieder umlegen**, sonst gibt es keinen Tiefschlaf.
+- **Kippschalter wieder umlegen**, sonst gibt es keinen Tiefschlaf. Steht
+  seit dem Flash auf an und haelt das Geraet durchgehend wach (Punkt 17).
 - **Bei einem Boardtausch die Chip-Revision pruefen.** `minimum_chip_revision:
   "3.1"` bindet die Firmware an diese Hardware (Punkt 16); auf einem aelteren
   ESP32 startet das Bild nicht.

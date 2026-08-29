@@ -237,7 +237,14 @@ Das erklärt beide Vorfälle und ist der Grund, warum neue Globals nach Möglich
 Globals (`verworfene_gewichte`, `erste_messung_erfolgt`,
 `kalibrier_restminuten`), alle `restore_value: no`, hat die Kalibrierung
 unangetastet gelassen — Faktor vorher und nachher −20.755,91, „Kalibriert bei"
-22,2 °C. Ein Datenpunkt ist kein Beweis: **trotzdem nach jedem Flash prüfen.**
+22,2 °C.
+
+**Am 29.08.2026 auf dem ESP32 bestätigt:** Ein Flash mit zwei neuen
+sdkconfig-Optionen (`minimum_chip_revision`, `sram1_as_iram`) und geänderten
+WLAN-Parametern hat den Faktor bei −14.081,15 und „Kalibriert bei" bei 20,9 °C
+gelassen. Auf dem ESP32 ist die strukturelle Ursache ohnehin entfallen — jedes
+Global hat dort einen eigenen NVS-Schlüssel. Zwei Datenpunkte sind kein
+Beweis: **trotzdem nach jedem Flash prüfen.**
 
 ## Wo was steht
 
