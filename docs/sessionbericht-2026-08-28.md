@@ -1040,7 +1040,79 @@ sie wäre dieser Flash nicht zustande gekommen. Ab jetzt wirkt wieder der
 reguläre Helfer `input_boolean.bienenwaage_wachhalten`, auf den die Firmware
 zeigt.
 
-## 18. Offene Punkte
+## 18. Kippschalter aus — jetzt kommt der eigentliche GPIO33-Test
+
+Am 29.08.2026 gegen 17:14 wurde der Kippschalter ausgeschaltet. Damit läuft
+zum ersten Mal seit dem Flash wieder ein Tiefschlafzyklus — und erst der
+beantwortet die Frage aus Punkt 8.
+
+### Was beim Ausschalten passiert, aus dem Quelltext
+
+`deep_sleep_esp32.cpp:81`:
+
+```cpp
+bool DeepSleepComponent::prepare_to_sleep_() {
+  if (this->wakeup_pin_mode_ == WAKEUP_PIN_MODE_KEEP_AWAKE && this->wakeup_pin_ != nullptr &&
+      this->wakeup_pin_->digital_read()) {
+    // Defer deep sleep until inactive
+    if (!this->next_enter_deep_sleep_) { ... ESP_LOGW(TAG, "Waiting for wakeup pin state change"); }
+    this->next_enter_deep_sleep_ = true;
+    return false;
+  }
+  return true;
+}
+```
+
+und `deep_sleep_component.cpp:41`:
+
+```cpp
+void DeepSleepComponent::loop() {
+  if (this->next_enter_deep_sleep_)
+    this->begin_sleep();
+}
+```
+
+`digital_read()` berücksichtigt `inverted: true`, liefert also `true`, wenn der
+Pin physisch auf **LOW** liegt — Schalter an. Solange das gilt, wird der
+Tiefschlaf verschoben und `next_enter_deep_sleep_` steht auf true. Ab da ruft
+`loop()` bei **jedem Durchlauf** `begin_sleep()` auf.
+
+**Folge: Ausschalten wirkt sofort, nicht am Ende der Wachzeit.** Das Gerät
+war 5.033 s wach, die 200 s `run_duration` waren also längst abgelaufen; es
+schläft im nächsten Schleifendurchlauf ein. Eine gerade laufende Messung wird
+nicht zu Ende geführt.
+
+Der Erklärtext auf dem Dashboard sagte bisher „der Tiefschlaf ist dann ab
+Ende der laufenden Wachzeit wieder frei". Das stimmt nur, solange die
+Wachzeit noch läuft — nach längerem Wachhalten nie. Korrigiert, mit dem
+Hinweis, vorher *Jetzt messen* zu drücken, wenn der letzte Wert noch mit
+soll.
+
+### Worauf jetzt zu achten ist
+
+GPIO33 hat weiterhin **keinen externen Pull-up** (offener Punkt seit
+Punkt 8). Im Tiefschlaf legt `esp_sleep_enable_ext0_wakeup()` den Pad auf die
+RTC-Funktion um, wo der über den GPIO-Treiber gesetzte Pull-up nicht mehr
+zählt — der Pin schwebt, und geweckt wird auf **LOW**.
+
+Damit sind zwei Ausgänge möglich, und welcher eintritt, entscheidet sich am
+Gerät und nicht am Schreibtisch:
+
+- **Der Pin bleibt hoch genug** (Reststrom, Leitungskapazität). Dann läuft
+  alles normal: rund 60 min Schlaf, kurze Wachphase, ein Messwert.
+- **Der Pin driftet nach LOW.** Dann weckt sich das Gerät selbst, immer
+  wieder. Erkennbar an einer Betriebszeit, die dauernd bei niedrigen Werten
+  neu anfängt, an Messwerten im Minutentakt statt stündlich, und an einem
+  Gerät, das trotz ausgeschaltetem Schalter kaum offline geht.
+
+Der zweite Fall wäre kein neuer Fehler, sondern die Bestätigung von Punkt 8 —
+und der Grund, den 10-kΩ-Widerstand von GPIO33 nach 3V3 nicht länger
+aufzuschieben.
+
+**Prüfen lässt sich das an genau einer Zahl:** kommt in rund einer Stunde
+**ein** Messwert, stimmt der Takt. Kommen viele, schwebt der Pin.
+
+## 19. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
@@ -1056,8 +1128,9 @@ zeigt.
   Reservierung wandert die Adresse wieder. `bienenwaage.local` ist keine
   Alternative: die mDNS-Auflösung ist hier nachweislich unzuverlässig, daran
   scheiterte schon die erste Adoption.
-- **Kippschalter wieder umlegen**, sonst gibt es keinen Tiefschlaf. Steht
-  seit dem Flash auf an und haelt das Geraet durchgehend wach (Punkt 17).
+- **Den Schlafzyklus nachpruefen** (Punkt 18). Der Schalter ist seit 17:14 aus,
+  der Tiefschlaf laeuft wieder. Kommt in einer Stunde genau EIN Messwert, ist
+  alles in Ordnung; kommen viele, schwebt GPIO33 und der Pull-up ist faellig.
 - **Bei einem Boardtausch die Chip-Revision pruefen.** `minimum_chip_revision:
   "3.1"` bindet die Firmware an diese Hardware (Punkt 16); auf einem aelteren
   ESP32 startet das Bild nicht.
