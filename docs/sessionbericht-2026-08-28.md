@@ -369,8 +369,9 @@ und es erklärt die 468 gesammelten Logzeilen samt HA-Meldung „logging too
 frequently, 200 messages". **Am 29.08. auf `false` gesetzt** — sofort wirksam,
 kein Flash nötig, jederzeit zurückzunehmen.
 
-**Am 29.08. um 07:15 bestätigt: es reicht.** Die Wachphase lief von ~07:04 bis
-07:07:16, danach Tiefschlaf — und die Sensoren halten ihre Werte:
+**Am 29.08. um 07:15 schien es zu reichen — die Schlussfolgerung war falsch.**
+Die Wachphase lief von ~07:04 bis 07:07:16, danach Tiefschlaf, und die Sensoren
+hielten ihre Werte:
 
 | Entity | Wert | zuletzt aktualisiert |
 |---|---|---|
@@ -388,11 +389,31 @@ letzte `handshake timeout` / `is unresponsive` auf 05:11:54, das letzte
 `Can't connect … Errno 113` um 07:07:34 — HA, das während des Schlafs
 weiterversucht, harmlos und bauartbedingt.
 
-**Bemerkenswert: die Feldstärke ist dabei unverändert −76 dBm.** Der
-ausschlaggebende Faktor war also wirklich die Bandbreite im Weckfenster, nicht
-der Empfangspegel allein. Die Funkstrecke bleibt trotzdem der Punkt mit der
-größten Reserve — bei −76 dBm ist bis zur Wackelgrenze von −80 dBm wenig Luft,
-und die nächste Störung kostet den Abschied erneut.
+**Beim nächsten Zyklus war es wieder kaputt.** Um 08:01:58 stand erneut
+
+```
+Error getting setting up connection for 192.168.1.115: Connection closed
+stockwaage @ 192.168.1.115: disconnect request failed
+  TimeoutAPIError: Timeout waiting for DisconnectResponse after 10.0s
+```
+
+im Log, und alle Entities gingen wieder auf `unavailable`.
+
+> **Ein einzelner guter Zyklus beweist bei einem sporadischen Fehler nichts.**
+> Genau das war der Denkfehler: aus einer Stichprobe von eins wurde eine
+> Bestätigung gemacht. Bei einem Fehler, der vorher auch nicht in jedem Zyklus
+> auftrat, muss über mehrere Zyklen gemessen werden — mindestens so viele, wie
+> vorher zwischen zwei Ausfällen lagen.
+
+`subscribe_logs: false` bleibt trotzdem richtig: es nimmt Last aus dem
+Weckfenster und kostet nichts. Es reicht nur nicht.
+
+**Nebenbei am 29.08. um 07:38:59: Home Assistant wurde neu gestartet.** Zu
+erkennen daran, dass alle `first_occurred`-Zeitstempel der Log-Gruppen auf
+diesen Moment zurücksprangen und die Helfer um 07:38:56 kurz auf `unavailable`
+gingen. Wer die Logs danach liest, darf die Gruppen nicht für frisch halten —
+dasselbe Muster wie die zusammengefassten Meldungen aus Punkt 5, nur
+andersherum.
 
 Nebenbefund aus derselben Messung: die Rohwert-Streuung liegt bei 14,8 counts,
 also unter einem Gramm (200 counts ≈ 10 g). Mechanik und HX711 arbeiten sauber.
@@ -430,7 +451,10 @@ Verbindungszustand anzuzeigen.
   am alten Board. Unter −80 dBm wird es laut eigener Dashboard-Doku wackelig,
   und schon jetzt kostet es den sauberen Abschied vor dem Einschlafen (Punkt 9).
   Standort, Antennenausrichtung oder ein Repeater in Reichweite.
-- ~~Prüfen, ob `subscribe_logs: false` reicht~~ — **erledigt am 29.08., es
-  reicht** (Punkt 9). Falls das Problem wiederkehrt, bleibt als letzte
-  Stellschraube eine längere Wachzeit; die kostet aber direkt Akkulaufzeit und
-  kommt deshalb zuletzt.
+- **Die Entities gehen weiterhin in den Schlafphasen auf `unavailable`.**
+  `subscribe_logs: false` hat nicht gereicht (Punkt 9). Offene Hebel: längere
+  `run_duration`, bessere Funkstrecke, oder das Dashboard so bauen, dass es den
+  zuletzt gemessenen Wert zeigt statt den Live-Zustand. Welcher davon der
+  richtige ist, hängt daran, ob das Gerät am Netzteil oder am Akku hängt — der
+  Kommentar bei `power_save_mode` in `bienenwaage.yaml` spricht von Netzteil,
+  ist aber aus der Portierungsphase und womöglich veraltet.
