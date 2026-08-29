@@ -101,6 +101,27 @@ Details zur Verdrahtung und zum Rest der Deep-Sleep-Vorbereitung:
    enthält keine Logik mehr.
 3. Gerät in Home Assistant hinzufügen (der API-Key aus `secrets.yaml`)
 
+### Beim Aktualisieren: immer BEIDE Dateien kopieren
+
+Wer eine neue Fassung aus GitHub holt, kopiert `bienenwaage.yaml` **und**
+`packages/waage-basis.yaml`. Nur die Gerätedatei zu kopieren geht schief,
+sobald eine Änderung über beide läuft, und die Fehlermeldungen zeigen nicht
+auf die Ursache. Am 29.08.2026 vorgekommen:
+
+```
+Source for extension of ID 'ota_esphome' was not found.
+Found multiple target platform blocks: esp8266, esp32. Only one is allowed.
+```
+
+Beides heißt dasselbe: die Basis in `/config/esphome/packages/` ist älter als
+die Gerätedatei. Der erste Fehler, weil das `!extend` auf eine `id` zeigt, die
+es dort noch nicht gibt; der zweite, weil die alte Basis noch einen
+`esp8266:`-Block trägt, den die neue Gerätedatei nicht mehr per `!remove`
+herausnimmt — das wurde zusammen aufgelöst.
+
+Zum Nachsehen, ob die Basis aktuell ist: sie darf **kein** `esp8266:` und
+**kein** `board: d1_mini` mehr enthalten und muss `id: ota_esphome` haben.
+
 ## Mehrere Stöcke
 
 Die Konfiguration ist in **eine Basis + eine Datei pro Stock** aufgeteilt:

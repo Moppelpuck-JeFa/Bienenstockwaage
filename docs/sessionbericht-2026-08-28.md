@@ -802,7 +802,37 @@ ausschließlich: die beiden OTA-Trigger samt Logzeilen, die neue `id`, und
 
 Keine Entity, kein Global, kein Messwert hat sich bewegt.
 
-### 14.5 Die Reihenfolge am Gerät
+### 14.5 Nur die halbe Datei kopiert
+
+Beim ersten Übersetzungsversuch nach der Änderung:
+
+```
+Source for extension of ID 'ota_esphome' was not found.
+Found multiple target platform blocks: esp8266, esp32. Only one is allowed.
+```
+
+Zwei Meldungen, eine Ursache: in `/config/esphome/packages/` lag eine
+`waage-basis.yaml` von **vor** dem 28.08.2026. Kopiert worden war nur
+`bienenwaage.yaml`.
+
+- `ota_esphome` gibt es in der alten Basis nicht — das `!extend` aus der
+  Gerätedatei findet nichts.
+- Die alte Basis trägt noch den `esp8266:`-Block. Früher nahm die Gerätedatei
+  ihn per `esp8266: !remove` heraus; seit dem 28.08. ist beides gemeinsam
+  entfallen. Alte Basis plus neue Gerätedatei ergibt deshalb zwei
+  Plattformblöcke.
+
+Keine der beiden Meldungen zeigt auf die eigentliche Ursache, und beide
+entstehen erst aus der **Kombination** zweier Dateistände. Das ist der Preis
+der Package-Aufteilung, und er fällt genau dann an, wenn eine Änderung über
+beide Dateien läuft.
+
+**Regel, jetzt auch in der README:** aus GitHub immer `bienenwaage.yaml`
+**und** `packages/waage-basis.yaml` kopieren. Schnelle Probe, ob die Basis
+aktuell ist — sie darf kein `esp8266:` und kein `board: d1_mini` mehr
+enthalten und muss `id: ota_esphome` haben.
+
+### 14.6 Die Reihenfolge am Gerät
 
 1. **Brücke steht schon auf an** — nichts zu tun.
 2. Eine Schlafperiode abwarten (bis zu 60 min). Beim Aufwachen liest die
@@ -819,7 +849,7 @@ Keine Entity, kein Global, kein Messwert hat sich bewegt.
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
   Masse steigen.
-- **Flashen, dann die Brücke löschen.** Ablauf in Punkt 14.5. Solange
+- **Flashen, dann die Brücke löschen.** Ablauf in Punkt 14.6. Solange
   `input_boolean.stockwaage_wachhalten` existiert, ist es der einzige Weg,
   das Gerät wach zu halten — beide anderen sind aus (Punkt 14.1).
 - **`use_address` nachziehen, falls die Lease wandert.** Steht fest auf
