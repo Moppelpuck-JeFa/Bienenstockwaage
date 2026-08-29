@@ -552,9 +552,12 @@ WLAN-Signal, Temperatur Mittel, Temp.-Korrektur und Gewicht verworfen. Die
 beiden Markdown-Karten, die `Kalibriert mit` und `Temp.-Korrektur` per Jinja2
 einsetzen, zeigen jetzt ebenfalls auf die Haltesensoren.
 
-> Achtung bei der Benennung: „Temp.-Korrektur" wird zu
+> ~~Achtung bei der Benennung: „Temp.-Korrektur" wird zu
 > `sensor.bienenwaage_temp_korrektur_zuletzt` — der Punkt entfällt, es wird
-> **nicht** `temperaturkorrektur_zuletzt`. Wer die ID rät, rät falsch.
+> **nicht** `temperaturkorrektur_zuletzt`.~~ **Überholt am 29.08.2026**
+> (Punkt 23): der Sensor heißt jetzt
+> `sensor.bienenwaage_temperaturkorrektur_zuletzt` und passt damit zu seiner
+> Quelle `sensor.bienenwaage_temperaturkorrektur`.
 
 **Bedienelemente werden ausgeblendet** — Messintervall, Referenzgewicht,
 Koeffizient, Durchsichtmodus, Durchsichtdauer und die vier Kalibrier-Buttons
@@ -1345,8 +1348,8 @@ Erledigt sich zusammen mit der Lease-Reservierung.
 **2. Namensasymmetrie.** Der Rohsensor heißt
 `sensor.bienenwaage_temperaturkorrektur`, der Haltesensor dazu
 `sensor.bienenwaage_temp_korrektur_zuletzt` — abgeleitet aus dem
-Anzeigenamen „Temp.-Korrektur". Wer die ID rät, rät falsch. Beide
-funktionieren; ein Umbenennen kostet Historie und lohnt nicht.
+Anzeigenamen „Temp.-Korrektur". Wer die ID rät, rät falsch.
+**Behoben, siehe Punkt 23.**
 
 **3. Helfer-Titel.** Die drei abgeleiteten Helfer heißen in Einstellungen →
 Helfer weiterhin „Stockwaage …", und `input_boolean.bienenwaage_wachhalten`
@@ -1355,7 +1358,84 @@ Historie sind korrekt, nur die Titel sind alt. Die object_id ist der Grund,
 warum sich am 29.08. kein zweiter Helfer mit dem Namen „Stockwaage
 Wachhalten" anlegen ließ (Punkt 14.1).
 
-## 23. Offene Punkte
+## 23. Die drei Funde abgearbeitet
+
+### 1. Karteileichen des alten Boards — erledigt
+
+Das FRITZ!Box-Gerät des alten Boards (`6b59c68e1d98cdc35da5fafffda700c2`,
+MAC `F8:B3:B7:49:59:7C`) ist in Home Assistant **deaktiviert** und heißt jetzt
+„Stockwaage ALT (Board bis 28.08.2026, .171)". Damit sind
+`device_tracker.bienenwaage_esp32` und
+`switch.bienenwaage_esp32_internetzugang` aus der Zustandsmaschine
+verschwunden — geprüft, beide liefern `ENTITY_NOT_FOUND`.
+
+**Deaktiviert und nicht gelöscht, mit Absicht.** Die FRITZ!Box kennt den Host
+weiterhin; ein gelöschtes Gerät legt die Integration beim nächsten Scan neu
+an, ein deaktiviertes bleibt deaktiviert. Der Name macht außerdem beim
+nächsten Blick in die Geräteliste sofort klar, welches Gerät das ist.
+
+Das aktuelle Board heißt zur Unterscheidung „Bienenwaage (FRITZ!Box, .115)".
+
+> **Nicht erledigt und auch nicht von hier aus erledigbar:** Die FRITZ!Box
+> selbst führt weiterhin zwei Hosts namens `stockwaage`, unter .171 und .115.
+> Das ist der Teil, der die Namensauflösung mehrdeutig macht. Er gehört im
+> Router gelöscht, zusammen mit der Lease-Reservierung für
+> `20:50:0D:CA:B2:BC`.
+
+### 2. Namensasymmetrie — erledigt
+
+`sensor.bienenwaage_temp_korrektur_zuletzt` heißt jetzt
+`sensor.bienenwaage_temperaturkorrektur_zuletzt` und passt damit zu seiner
+Quelle `sensor.bienenwaage_temperaturkorrektur`. Anzeigename ebenfalls
+angeglichen: „Bienenwaage Temperaturkorrektur (zuletzt)".
+
+Ein Registry-Rename erhält die Historie (HA 2022.4+); der Sensor liefert nach
+der Umbenennung unverändert 0,0345 kg.
+
+**Und diesmal wurde die Verbrauchersuche vorher gemacht** — die Lehre aus
+Punkt 14.1. Zwei Fundstellen im Dashboard, beide nachgezogen:
+
+| Ort | Art |
+|---|---|
+| `views[2].sections[0].cards[9]` | `tile`, Feld `entity` |
+| `views[2].sections[1].cards[6]` | `markdown`, in einem Jinja2-`states()` |
+
+Die zweite hätte eine reine Kachelsuche nicht gefunden. Zusätzlich geprüft:
+keine Automation, kein Skript, keine Szene und kein anderer Helfer
+referenziert die alte ID.
+
+### 3. Helfer-Titel — bewusst nicht angefasst
+
+Hier endet, was sich ohne Schaden machen lässt. Der Befund genauer als vorher:
+
+| Was | Wert |
+|---|---|
+| Entity-ID | `sensor.bienenwaage_tagesbilanz` ✓ |
+| Anzeigename (Registry) | „Bienenwaage Tagesbilanz" ✓ |
+| `original_name` | „Stockwaage Tagesbilanz" |
+| Titel des Config-Entry | „Stockwaage Tagesbilanz" |
+
+**Überall, wo diese Sensoren im Betrieb auftauchen — Dashboard, Entitätsliste,
+Verlauf —, steht bereits der richtige Name.** „Stockwaage …" erscheint nur
+noch an einer Stelle: Einstellungen → Geräte & Dienste → **Helfer**, wo HA den
+Titel des Config-Entry anzeigt.
+
+Und genau der lässt sich nicht ändern. Der Options-Flow dieser Helfertypen
+nimmt den Schlüssel `name` bei einem Update nicht an; umbenennen ginge nur
+über Löschen und Neuanlegen. Das kostet die **Langzeitstatistik** von
+`sensor.bienenwaage_tagesbilanz` und die Historie der beiden
+Derivative-Sensoren — also genau das, wofür diese ganze Migration über die
+Entity-Registry statt über `geraete_name` gelaufen ist.
+
+Ein Anzeigename im Helfer-Menü ist das nicht wert. Die drei Titel bleiben
+stehen.
+
+Dasselbe gilt für die object_id `stockwaage_wachhalten` hinter
+`input_boolean.bienenwaage_wachhalten`: interner Speicherschlüssel,
+unveränderlich ohne Neuanlage — und diese Entity ist die einzige, die die
+**Firmware** referenziert. Daran wird nicht gerührt.
+
+## 24. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
@@ -1388,9 +1468,10 @@ Wachhalten" anlegen ließ (Punkt 14.1).
   `Unauthorized`, und auch der Umweg über den HA-Core-Proxy `supervisor/api`
   wird abgewiesen. Damit sind Add-on-Dateien und die WebSocket-Schnittstelle
   des Device Builders von außen nicht lesbar — jede YAML muss von Hand kommen.
-- **Helfer-Titel.** Die drei Rechenhelfer heißen in Einstellungen → Helfer
-  weiterhin „Stockwaage …". Kosmetisch; Umbenennen ginge nur über Löschen und
-  Neuanlegen und kostete die Historie.
+- ~~Helfer-Titel.~~ **Entschieden, nicht offen** (Punkt 23): Die drei
+  Rechenhelfer behalten ihren Titel „Stockwaage …" in Einstellungen → Helfer.
+  Entity-IDs und Anzeigenamen sind korrekt; den Titel zu ändern ginge nur über
+  Löschen und Neuanlegen und kostete die Langzeitstatistik.
 - **Beobachten, ob der Verbindungsabbau sauber bleibt** (Punkt 22). Bleibt er
   es, sind die elf Haltesensoren überflüssig. Mehrere Zyklen abwarten.
 - **Funkstrecke verbessern — inzwischen der erste Punkt, nicht der letzte.**
