@@ -585,7 +585,61 @@ früheren 33,62 kg — es wurde also mit einem anderen Prüfgewicht neu
 kalibriert. Und das WLAN ist von −76 auf **−78 dBm** gerutscht, womit bis zur
 Wackelgrenze von −80 dBm kaum noch Luft bleibt.
 
-## 13. Offene Punkte
+## 13. Zurückgenommen: das Ausblenden der Bedienelemente
+
+Punkt 12 hat einen Fehler eingebaut, und zwar einen handfesten. Die
+`conditional`-Karten haben die vier Kalibrier-Buttons, Messintervall,
+Referenzgewicht, Koeffizient, Durchsichtmodus und Durchsichtdauer
+ausgeblendet, solange `binary_sensor.bienenwaage_verbindung` nicht `on` war.
+
+**Die Rechnung dazu war nie aufgestellt worden.** Bei 60 min Schlafdauer und
+200 s Wachzeit ist das Gerät rund **3 von 60 Minuten** erreichbar, also 5 % der
+Zeit. Die Bedienelemente waren damit in 95 % aller Blicke aufs Dashboard nicht
+vorhanden — nicht ausgegraut, sondern weg. Wer kalibrieren wollte, fand die
+Buttons nicht und hatte keinen Anhaltspunkt, wonach er suchen sollte.
+
+Ausgegraut wäre in jeder Hinsicht besser gewesen: die Kachel ist auffindbar,
+ihre Position ist gelernt, und im richtigen Moment lässt sie sich drücken.
+
+Die Trennung aus Punkt 12 war also an der falschen Kante gezogen. Sie lautet
+jetzt:
+
+- **Alles, was man drückt oder einstellt, ist immer sichtbar** — Buttons,
+  Number-Felder, Schalter. Im Schlaf ausgegraut, aber da.
+- **Reine Anzeigen** zeigen entweder den gehaltenen letzten Wert (die elf
+  `_zuletzt`-Helfer) oder bleiben ausgeblendet, wo es keinen gehaltenen Wert
+  gibt.
+
+Danach ist genau **eine** `conditional`-Karte übrig: die Kalibrier-Sperre unter
+*Diagnose*. Sie zählt Restminuten herunter und ist im Schlaf tatsächlich
+bedeutungslos — für sie gibt es bewusst keinen Haltesensor.
+
+Die Erklärtexte, die im Schlaf an Stelle der Bedienelemente standen, sind
+entfallen. Ihr Inhalt steckt jetzt als Vorbemerkung in den ohnehin vorhandenen
+Markdown-Karten daneben, mit „ausgegraut" statt „ausgeblendet".
+
+**Mit entfernt: die Kachel *Schalter am Gerät*** (Übersicht, Abschnitt
+Bedienung). Sie hing an `binary_sensor.bienenwaage_wachhalten_schalter`, und
+genau dieser `binary_sensor` ist für den GPIO33-Test aus der Firmware
+genommen worden (Punkt 8). Sie unbedingt sichtbar zu machen hätte eine Kachel
+ergeben, die nach dem nächsten Flash dauerhaft auf „nicht verfügbar" steht.
+Der erklärende Text darunter bleibt — der Kippschalter existiert weiter, er
+wird nur nicht mehr als Entity mitgelesen. Fällt der Test aus wie erhofft und
+kommt der `binary_sensor` zurück, kommt auch die Kachel zurück.
+
+### Was dieser Hin- und Rückweg zeigt
+
+Graue Kacheln und versteckte Bedienelemente sind dieselbe Münze. Ein Gerät,
+das 95 % der Zeit nicht erreichbar ist, lässt sich im Dashboard nicht so
+darstellen, dass beides gleichzeitig gut ist — man verschiebt den Mangel nur
+von einer Stelle an die andere.
+
+Der einzige Weg, beides zu haben, ist das Gerät erreichbar zu machen. Es
+hängt am Netzteil; `run_duration` von 200 s auf etwa 600 s zu erhöhen oder den
+Tiefschlaf ganz abzuschalten, löst das Problem an der Wurzel und macht
+nebenbei alle elf Haltesensoren überflüssig. Das steht weiterhin offen.
+
+## 14. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
@@ -607,14 +661,20 @@ Wackelgrenze von −80 dBm kaum noch Luft bleibt.
 - **Helfer-Titel.** Die drei Rechenhelfer heißen in Einstellungen → Helfer
   weiterhin „Stockwaage …". Kosmetisch; Umbenennen ginge nur über Löschen und
   Neuanlegen und kostete die Historie.
-- **Funkstrecke verbessern — der wichtigste Punkt.** −76 dBm gegenüber −67 dBm
+- **Funkstrecke verbessern.** Zuletzt −78 dBm gegenüber −67 dBm
   am alten Board. Unter −80 dBm wird es laut eigener Dashboard-Doku wackelig,
   und schon jetzt kostet es den sauberen Abschied vor dem Einschlafen (Punkt 9).
   Standort, Antennenausrichtung oder ein Repeater in Reichweite.
 - **Die Entities gehen weiterhin in den Schlafphasen auf `unavailable`.**
-  `subscribe_logs: false` hat nicht gereicht (Punkt 9). Offene Hebel: längere
-  `run_duration`, bessere Funkstrecke, oder das Dashboard so bauen, dass es den
-  zuletzt gemessenen Wert zeigt statt den Live-Zustand. Welcher davon der
-  richtige ist, hängt daran, ob das Gerät am Netzteil oder am Akku hängt — der
-  Kommentar bei `power_save_mode` in `bienenwaage.yaml` spricht von Netzteil,
-  ist aber aus der Portierungsphase und womöglich veraltet.
+  `subscribe_logs: false` hat nicht gereicht (Punkt 9). Das Dashboard fängt es
+  jetzt über die elf Haltesensoren ab (Punkt 10–13), die Ursache ist damit aber
+  nicht weg.
+- **`run_duration` erhöhen — der wichtigste offene Punkt.** Bestätigt: das
+  Gerät hängt am **Netzteil**, der Kommentar bei `power_save_mode` in
+  `bienenwaage.yaml` stimmt also. Damit gibt es keinen Grund für 200 s
+  Wachzeit. Bei 60 min Schlafdauer ist das Gerät heute 5 % der Zeit
+  erreichbar; das ist die gemeinsame Ursache hinter grauen Kacheln,
+  versteckten Bedienelementen und dem unsauberen Verbindungsabbruch. Auf
+  etwa 600 s zu gehen oder den Tiefschlaf abzuschalten würde alle drei
+  erledigen und die elf Haltesensoren überflüssig machen. Bislang bewusst
+  nicht gemacht — die Entscheidung fiel für den Dashboard-Weg.
