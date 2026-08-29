@@ -482,7 +482,54 @@ Gerät seit 08:01:58 nicht gemeldet, die Haltesensoren standen deshalb noch auf
 `unknown`. Die Wirkung lässt sich erst nach mindestens zwei aufeinander
 folgenden Schlafphasen beurteilen — siehe den Fehlschluss in Punkt 9.
 
-## 11. Offene Punkte
+## 11. Der Nachschlag: es war nicht nur die Anzeige
+
+Nach dem Umbau aus Punkt 10 standen weiter Kacheln auf „nicht verfügbar". Die
+Prüfung zeigte, dass zwei verschiedene Dinge dahintersteckten.
+
+**Erstens: die Rechenhelfer waren selbst kaputt, nicht nur ihre Darstellung.**
+Alle drei gingen mit der Quelle auf `unavailable`, und
+`sensor.bienenwaage_gewichtsanderung` hatte deshalb seit dem Anlegen des
+Haltesensors *nie* einen gültigen Wert. Ein weiterer Wrapper hätte daran
+nichts geändert — er kann nur halten, was er einmal gesehen hat.
+
+> **Wenn der Wrapper leer bleibt, ist nicht der Wrapper das Problem, sondern
+> die Quelle.** Ein Haltesensor über einer Quelle, die nie einen gültigen Wert
+> liefert, bleibt auf `unknown`. Das ist kein Fehler des Verfahrens, sondern
+> sein korrektes Verhalten — und ein Hinweis, eine Ebene tiefer zu schauen.
+
+Deshalb wurden die drei Helfer doch noch auf `sensor.bienenwaage_gewicht_zuletzt`
+umgehängt, also auf die lückenlose Quelle. Damit sind sie dauerhaft verfügbar,
+und die beiden Wrapper `tagesbilanz_zuletzt` und `gewichtsanderung_zuletzt`
+wurden überflüssig und gelöscht. Übrig bleiben zwei Haltesensoren statt vier.
+
+Für die Rechnung ist das kein Nachteil, sondern ein Vorteil: eine
+stufenförmig gehaltene Reihe ist für eine Ableitung über 6 h und für
+`statistics/change` über 24 h genau das Richtige — Lücken sind es nicht.
+
+Nach dem Umhängen stehen die beiden Ableitungen zunächst auf `unknown`: sie
+wurden neu geladen und brauchen zwei Messpunkte, füllen sich also innerhalb
+weniger Stunden. `unknown` ist dabei nicht dasselbe wie `unavailable` — die
+Entity existiert und ist erreichbar, sie hat nur noch keinen Wert.
+
+**Zweitens: Buttons kann man nicht halten.** `button.bienenwaage_jetzt_messen`,
+`button.bienenwaage_tara` und `binary_sensor.bienenwaage_wachhalten_schalter`
+sind im Schlaf zu Recht nicht verfügbar — ein schlafendes Gerät nimmt keinen
+Tastendruck an, und eine Kachel, die Verfügbarkeit vortäuscht, wäre gelogen.
+
+Gelöst über `conditional`-Karten, die an
+`binary_sensor.bienenwaage_verbindung` hängen: im Wachbetrieb erscheinen die
+Bedienelemente, im Schlaf an ihrer Stelle ein Text, der erklärt, warum sie
+gerade fehlen und wie man sie erreicht. Ausgeblendet statt ausgegraut.
+
+**Die Kachel „Temp.-Korrektur" wurde aus der Übersicht entfernt.** Sie ist ein
+Diagnosewert und steht in der Ansicht *Technik* ohnehin — dort gehört sie hin,
+und dort ist „nicht verfügbar" die richtige Auskunft.
+
+**Stand danach:** Gewicht 35,2 kg, Temperatur 18,8 °C, Tagesbilanz 0,0 kg —
+alle belegt, während das Gerät seit 10:38:21 schläft.
+
+## 12. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
