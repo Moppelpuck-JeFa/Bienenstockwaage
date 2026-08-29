@@ -1291,7 +1291,71 @@ und sehen, ob die Betriebszeit unmittelbar danach neu anfängt. Bleibt es weg,
 ist die serielle Konsole der einzige Weg, der den Weckgrund unabhängig vom
 WLAN zeigt (`esp_sleep_get_wakeup_cause()` im Startlog).
 
-## 22. Offene Punkte
+## 22. Entity-Prüfung in Home Assistant
+
+Vollständiger Abgleich am 29.08.2026, 18:40.
+
+### Vollzählig und stimmig
+
+- **25 Entities vom Gerät**: 2 binary_sensor, 4 button, 4 number, 13 sensor,
+  2 switch. Alle vorhanden, alle mit plausiblen Werten.
+- **11 Haltesensoren** (`_zuletzt`), jeder mit demselben Wert wie seine Quelle.
+- **3 abgeleitete Helfer**: Tagesbilanz 0,1 kg, Gewichtsänderung 0,01 kg/d,
+  Gewichtsverlust kurz −0,05 kg/h.
+- **`input_boolean.bienenwaage_wachhalten` existiert** — die einzige HA-Entity,
+  die die Firmware referenziert, löst also auf. Das ist die Stelle, die am
+  28.08. stumm ausfiel (Punkt 14.1).
+- **Alle Entity-Verweise des Dashboards** über alle drei Ansichten lösen auf,
+  einschließlich der in Jinja2-Markdown eingebetteten.
+- **Keine verwaisten `stockwaage_*`-Entity-IDs.** Die Umbenennung hat nichts
+  zurückgelassen.
+- **Schlafzyklus korrekt**: Boot 18:22:10, eingeschlafen 18:25:09 — 200 s,
+  exakt `run_duration`.
+
+### Beobachtung: der Abschied war diesmal sauber
+
+Nach dem Einschlafen um 18:25 sind die Rohsensoren **nicht** auf
+`unavailable` gegangen — Home Assistant hat die letzten Werte behalten. Genau
+das war die Bedingung, an der es in Punkt 9 scheiterte: bei `has_deep_sleep`
+hält HA die Werte nur bei einem *sauberen* Verbindungsabbau.
+
+Wenn das bleibt, sind die elf Haltesensoren überflüssig. **Ein Zyklus beweist
+das nicht** — derselbe Fehlschluss ist in dieser Sitzung schon einmal
+passiert (`subscribe_logs`, Punkt 11). Also beobachten, nicht verkünden.
+
+### Drei Funde, alle unkritisch
+
+**1. Zwei Karteileichen des alten Boards, aus der FRITZ!Box-Integration:**
+
+| Entity | MAC | IP | Zustand |
+|---|---|---|---|
+| `device_tracker.bienenwaage` | 20:50:0D:CA:B2:BC | 192.168.1.115 | `home` — das aktuelle Board |
+| `device_tracker.bienenwaage_esp32` | F8:B3:B7:49:59:7C | **192.168.1.171** | `not_home` seit 10:38 — das alte |
+
+Dazu doppelt: `switch.bienenwaage_internetzugang` und
+`switch.bienenwaage_esp32_internetzugang`.
+
+**Das ist mehr als Kosmetik.** Die FRITZ!Box kennt weiterhin einen Host namens
+`stockwaage` unter .171. Zwei Hosts gleichen Namens im Router — das ist ein
+eigenständiger Kandidat für die `.171`-Zugriffe des Device Builders, unabhängig
+vom mDNS-Cache des Add-ons (Punkt 14.2). Löschen lässt sich das nur in der
+FRITZ!Box selbst; in HA gelöschte Einträge legt die Integration neu an.
+Erledigt sich zusammen mit der Lease-Reservierung.
+
+**2. Namensasymmetrie.** Der Rohsensor heißt
+`sensor.bienenwaage_temperaturkorrektur`, der Haltesensor dazu
+`sensor.bienenwaage_temp_korrektur_zuletzt` — abgeleitet aus dem
+Anzeigenamen „Temp.-Korrektur". Wer die ID rät, rät falsch. Beide
+funktionieren; ein Umbenennen kostet Historie und lohnt nicht.
+
+**3. Helfer-Titel.** Die drei abgeleiteten Helfer heißen in Einstellungen →
+Helfer weiterhin „Stockwaage …", und `input_boolean.bienenwaage_wachhalten`
+trägt intern noch die object_id `stockwaage_wachhalten`. Entity-IDs und
+Historie sind korrekt, nur die Titel sind alt. Die object_id ist der Grund,
+warum sich am 29.08. kein zweiter Helfer mit dem Namen „Stockwaage
+Wachhalten" anlegen ließ (Punkt 14.1).
+
+## 23. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
@@ -1308,8 +1372,10 @@ WLAN zeigt (`esp_sleep_get_wakeup_cause()` im Startlog).
 - ~~Den GPIO33-Test auswerten.~~ **Erledigt** (Punkt 20): Der `binary_sensor`
   ist zurück, weil ohne ihn der Tiefschlaf gar nicht mehr zustande kommt. Die
   Doppelbelegung ist als Ursache fürs Nicht-Wecken ausgeschlossen.
-- **Feste IP vergeben.** Für MAC `20:50:0D:CA:B2:BC` eine Lease-Reservierung in
-  der FRITZ!Box. Das alte Board hatte `.171`, dieses hat `.115` — ohne
+- **Feste IP vergeben und den alten Host loeschen.** Für MAC
+  `20:50:0D:CA:B2:BC` eine Lease-Reservierung in der FRITZ!Box, und den
+  Eintrag des alten Boards (`F8:B3:B7:49:59:7C`, .171, ebenfalls Hostname
+  `stockwaage`) entfernen — siehe Punkt 22. Das alte Board hatte `.171`, dieses hat `.115` — ohne
   Reservierung wandert die Adresse wieder. `bienenwaage.local` ist keine
   Alternative: die mDNS-Auflösung ist hier nachweislich unzuverlässig, daran
   scheiterte schon die erste Adoption.
@@ -1325,6 +1391,8 @@ WLAN zeigt (`esp_sleep_get_wakeup_cause()` im Startlog).
 - **Helfer-Titel.** Die drei Rechenhelfer heißen in Einstellungen → Helfer
   weiterhin „Stockwaage …". Kosmetisch; Umbenennen ginge nur über Löschen und
   Neuanlegen und kostete die Historie.
+- **Beobachten, ob der Verbindungsabbau sauber bleibt** (Punkt 22). Bleibt er
+  es, sind die elf Haltesensoren überflüssig. Mehrere Zyklen abwarten.
 - **Funkstrecke verbessern — inzwischen der erste Punkt, nicht der letzte.**
   −84 dBm (Punkt 15), gegenüber −67 dBm am alten Board. Die eigene
   Wackelgrenze von −80 dBm ist unterschritten, ganze Weckfenster fallen aus,
