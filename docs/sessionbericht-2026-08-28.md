@@ -369,8 +369,35 @@ und es erklärt die 468 gesammelten Logzeilen samt HA-Meldung „logging too
 frequently, 200 messages". **Am 29.08. auf `false` gesetzt** — sofort wirksam,
 kein Flash nötig, jederzeit zurückzunehmen.
 
-Ob das allein reicht, ist offen: es nimmt Last aus dem Weckfenster, ändert aber
-nichts an der Feldstärke. Die eigentliche Abhilfe bleibt die Funkstrecke.
+**Am 29.08. um 07:15 bestätigt: es reicht.** Die Wachphase lief von ~07:04 bis
+07:07:16, danach Tiefschlaf — und die Sensoren halten ihre Werte:
+
+| Entity | Wert | zuletzt aktualisiert |
+|---|---|---|
+| Gewicht | 35,2 kg | 07:06:23 |
+| Temperatur | 17,4 °C | 07:06:23 |
+| Betriebszeit | 90,2 s | 07:06:23 |
+| Rohwert Streuung | 14,8 counts | 07:06:23 |
+| WLAN-Signal | −76,0 dBm | 07:04:01 |
+| Verbindung | off | 07:07:16 |
+
+Keine der drei kritischen Meldungen trat im Weckfenster erneut auf: das letzte
+`Timeout waiting for DisconnectResponse` steht weiterhin auf 02:18:04, das
+letzte `handshake timeout` / `is unresponsive` auf 05:11:54, das letzte
+`Timeout waiting for DeviceInfoResponse` auf 02:17:54. Übrig bleibt nur
+`Can't connect … Errno 113` um 07:07:34 — HA, das während des Schlafs
+weiterversucht, harmlos und bauartbedingt.
+
+**Bemerkenswert: die Feldstärke ist dabei unverändert −76 dBm.** Der
+ausschlaggebende Faktor war also wirklich die Bandbreite im Weckfenster, nicht
+der Empfangspegel allein. Die Funkstrecke bleibt trotzdem der Punkt mit der
+größten Reserve — bei −76 dBm ist bis zur Wackelgrenze von −80 dBm wenig Luft,
+und die nächste Störung kostet den Abschied erneut.
+
+Nebenbefund aus derselben Messung: die Rohwert-Streuung liegt bei 14,8 counts,
+also unter einem Gramm (200 counts ≈ 10 g). Mechanik und HX711 arbeiten sauber.
+Die Betriebszeit von 90,2 s beim Veröffentlichen passt exakt zur eingestellten
+`einschwingzeit` — der `on_boot`-Ablauf läuft wie entworfen.
 
 **Nicht verwechseln:** `binary_sensor.bienenwaage_verbindung` geht beim Trennen
 auf `off` und nicht auf `unavailable`. Das ist Absicht — im Diagnose-Dump
@@ -403,7 +430,7 @@ Verbindungszustand anzuzeigen.
   am alten Board. Unter −80 dBm wird es laut eigener Dashboard-Doku wackelig,
   und schon jetzt kostet es den sauberen Abschied vor dem Einschlafen (Punkt 9).
   Standort, Antennenausrichtung oder ein Repeater in Reichweite.
-- **Prüfen, ob `subscribe_logs: false` reicht**, damit die Entities im Schlaf
-  ihre Werte behalten. Falls nicht, bleibt als letzte Stellschraube eine
-  längere Wachzeit — die kostet aber direkt Akkulaufzeit und kommt deshalb
-  zuletzt.
+- ~~Prüfen, ob `subscribe_logs: false` reicht~~ — **erledigt am 29.08., es
+  reicht** (Punkt 9). Falls das Problem wiederkehrt, bleibt als letzte
+  Stellschraube eine längere Wachzeit; die kostet aber direkt Akkulaufzeit und
+  kommt deshalb zuletzt.
