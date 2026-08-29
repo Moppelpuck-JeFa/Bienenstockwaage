@@ -529,7 +529,63 @@ und dort ist „nicht verfügbar" die richtige Auskunft.
 **Stand danach:** Gewicht 35,2 kg, Temperatur 18,8 °C, Tagesbilanz 0,0 kg —
 alle belegt, während das Gerät seit 10:38:21 schläft.
 
-## 12. Offene Punkte
+## 12. Auch die Ansicht *Technik*
+
+In Punkt 10 war *Technik* bewusst ausgelassen worden, mit dem Argument, dort
+sei „nicht verfügbar" eine ehrliche Diagnoseauskunft. Das war aus der
+Schreibtischperspektive richtig und aus der Benutzerperspektive falsch: wer
+täglich auf eine Seite voller grauer Kacheln schaut, liest sie als Defekt, nicht
+als Auskunft.
+
+Umgestellt nach demselben Muster, aber mit einer bewussten Trennung:
+
+**Messwerte werden gehalten** — neun weitere Template-Helfer für
+Kalibrierfaktor, Kalibriert bei, Kalibriert mit, Rohwert, Rohwert Streuung,
+WLAN-Signal, Temperatur Mittel, Temp.-Korrektur und Gewicht verworfen. Die
+beiden Markdown-Karten, die `Kalibriert mit` und `Temp.-Korrektur` per Jinja2
+einsetzen, zeigen jetzt ebenfalls auf die Haltesensoren.
+
+> Achtung bei der Benennung: „Temp.-Korrektur" wird zu
+> `sensor.bienenwaage_temp_korrektur_zuletzt` — der Punkt entfällt, es wird
+> **nicht** `temperaturkorrektur_zuletzt`. Wer die ID rät, rät falsch.
+
+**Bedienelemente werden ausgeblendet** — Messintervall, Referenzgewicht,
+Koeffizient, Durchsichtmodus, Durchsichtdauer und die vier Kalibrier-Buttons
+hängen an `conditional`-Karten. Ein schlafender ESP32 nimmt keine Änderung an;
+eine Kachel, die Bedienbarkeit vortäuscht, führt in die Irre. Im Schlaf steht
+an ihrer Stelle ein Text, der erklärt warum und wie man herankommt.
+
+**Die Kalibrier-Sperre** ist ebenfalls konditional statt gehalten: sie zählt
+Restminuten herunter und ist im Schlaf bedeutungslos.
+
+**Die Betriebszeit** zeigte durch `| int(0)` bisher „0d 0h 0m", wenn die Quelle
+weg war — eine Null, die wie eine Messung aussieht. Jetzt erscheint stattdessen
+ein Gedankenstrich mit dem Hinweis, dass das Gerät schläft.
+
+### Die Bilanz dieses Verfahrens, ehrlich
+
+Es stehen jetzt **elf Template-Helfer** nur für die Anzeige. Das ist viel
+Maschinerie für ein Problem, das eine einzige Zahl in der Firmware auch löst:
+Das Gerät hängt am Netzteil, eine deutlich längere `run_duration` — oder gar
+kein Tiefschlaf — würde das Verschwinden der Entities von vornherein
+verhindern und alle elf Helfer überflüssig machen.
+
+Dafür ist der gewählte Weg von der Verbindungsqualität unabhängig: er wirkt
+auch dann, wenn die Funkstrecke schlechter wird, und er braucht keinen Flash.
+Beides sind vertretbare Positionen; die Entscheidung fiel bewusst für die
+Anzeige und gegen den Eingriff in die Firmware.
+
+**Messwerte beim Umbau** (Gerät kurz wach): Kalibrierfaktor −14.081,15,
+Kalibriert bei 20,9 °C, Kalibriert mit **26,22 kg**, Rohwert −509.448,94,
+Rohwert Streuung **152,0 counts**, WLAN **−78 dBm**, Temperatur Mittel
+19,7 °C, Temp.-Korrektur −0,040 kg, Gewicht verworfen 0.
+
+Zwei davon sind erwähnenswert: „Kalibriert mit" steht auf 26,22 kg statt der
+früheren 33,62 kg — es wurde also mit einem anderen Prüfgewicht neu
+kalibriert. Und das WLAN ist von −76 auf **−78 dBm** gerutscht, womit bis zur
+Wackelgrenze von −80 dBm kaum noch Luft bleibt.
+
+## 13. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
