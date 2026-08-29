@@ -713,6 +713,59 @@ die Lease, schlägt nur der Upload fehl und die Zeile ist nachzuziehen;
 unerreichbar wird das Gerät dadurch nie. Die feste Lease in der FRITZ!Box
 bleibt der saubere Weg.
 
+#### Woher die .171 kommt — nachgelesen, nicht vermutet
+
+Nachdem der Builder danach *wieder* auf `192.168.1.171` zugriff, wurde die
+Kette in ESPHome 2026.6.5 im Quelltext verfolgt statt geraten:
+
+1. **`dashboard/web_server.py:433`** — die Weboberfläche ruft die CLI mit
+   `--device <port>` auf, wobei `port` die Auswahl im Install-Dialog ist.
+   Für „Wirelessly" ist das die Zeichenkette `OTA`.
+2. **`dashboard/web_server.py:381–392`** — vorher baut sie
+   `--mdns-address-cache`/`--dns-address-cache`-Argumente. Endet
+   `entry.address` auf `.local`, wird der **mDNS-Cache der Weboberfläche**
+   mitgegeben. Dort steht die Adresse, unter der `stockwaage.local` zuletzt
+   gesehen wurde — beim alten Board `192.168.1.171`.
+3. **`dashboard/entries.py:389`** — `entry.address` kommt aus
+   `.esphome/<datei>.json`, nicht aus der YAML. Geschrieben wird die Datei
+   erst beim **Übersetzen** (`writer.py:143–168`), sie hinkt also hinterher.
+4. **`__main__.py:293–316`** — die CLI löst `OTA` so auf:
+
+   ```python
+   elif device == "OTA":
+       # ensure IP adresses are used first
+       if is_ip_address(CORE.address) and ...:
+           resolved.extend(_resolve_with_cache(CORE.address, purpose))
+       ...
+           if has_ota() and has_non_ip_address() and has_resolvable_address():
+               resolved.extend(_ota_hostnames_for_default(purpose))
+   ```
+
+   `CORE.address` ist `use_address` aus der **gerade geladenen YAML**. Ist es
+   eine IP, wird sie direkt genommen und gar nicht mehr aufgelöst. Ist es ein
+   Name, geht es über die Namensauflösung — und dort greift der unter 2.
+   mitgegebene Cache mit der `.171`.
+
+   Der Fehlertext der Stelle empfiehlt von sich aus: *„If you know the IP, set
+   'use_address' in your network config."*
+
+Zwei Folgerungen, beide nicht offensichtlich:
+
+- **Die Änderung im Repo tut gar nichts, solange die Datei nicht in
+  `/config/esphome/` liegt.** Das Add-on übersetzt ausschließlich das, was
+  dort steht. Wer „aus GitHub flasht", kopiert von Hand — und wer das
+  vergisst, bekommt exakt das alte Verhalten samt alter Adresse.
+- **Ein vorheriges Übersetzen ist nicht nötig.** Weil `CORE.address` aus der
+  YAML kommt und nicht aus `.esphome/<datei>.json`, wirkt `use_address` schon
+  beim ersten Versuch. Die veraltete gespeicherte Adresse beeinflusst nur die
+  Cache-Argumente, und die sind bedeutungslos, sobald nichts mehr aufzulösen
+  ist.
+
+Was dagegen **nicht** hilft: im Install-Dialog einen Eintrag zu wählen, der
+buchstäblich `192.168.1.171` anzeigt. Der landet über den `else`-Zweig
+(`resolved.append(device)`) unverändert als Ziel. Es muss der Eintrag **OTA**
+sein.
+
 ### 14.3 Ein laufendes OTA fällt in den Tiefschlaf
 
 Beim Prüfen mitgefunden, noch nicht aufgetreten: `deep_sleep` schaltet nach
