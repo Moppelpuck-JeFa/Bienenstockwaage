@@ -202,30 +202,143 @@ ungenauer Kalibriervorgang. **Mit einem bekannten Gewicht gegenprüfen:** legt
 man ein Prüfgewicht auf, muss die Anzeige um dessen Masse steigen. Weicht sie
 systematisch ab, beide Kalibrierschritte wiederholen.
 
-## 7. Offene Punkte
+## 7. Das Repo holt die Wirklichkeit ein
 
-- **`bienenwaage.yaml` ist nicht im Repo.** Sie konnte auch nicht geholt
-  werden: der MCP-Token hat keinen Supervisor-Zugriff (`/addons` →
-  *Unauthorized*), damit sind weder die Add-on-Dateiliste noch die
-  WebSocket-Schnittstelle des Device Builders erreichbar. Von Hand einchecken,
-  sonst beschreibt das Repo dauerhaft ein Gerät, das es nicht mehr gibt.
-- **Kalibrierfaktor gegenprüfen**, siehe Punkt 6.
-- **Feste IP vergeben.** Für MAC `20:50:0D:CA:B2:BC` eine Lease-Reservierung
-  in der FRITZ!Box setzen. Das alte Board hatte `.171`, dieses hat `.115` —
-  ohne Reservierung wandert die Adresse beim nächsten Mal wieder.
-  `bienenwaage.local` ist keine Alternative: die mDNS-Auflösung ist in dieser
-  Installation nachweislich unzuverlässig, daran scheiterte schon die erste
-  Adoption (`Timeout while resolving IP address`).
-- **Kippschalter wieder umlegen**, sonst gibt es keinen Tiefschlaf und der
-  Akku läuft leer.
-- **Die Umbenennung lebt nur in der HA-Registry.** Die YAML sagt weiterhin
-  `stockwaage`. Das ist stabil und überlebt Flashes, aber wer nur die YAML
-  liest, findet den Namen nicht wieder. Beim nächsten Anfassen der Datei einen
-  Kommentar hinterlassen.
-- **`waage-eg.yaml` beschreibt Hardware, die nicht mehr läuft** — der
-  Config-Entry „Waage" steht auf `unavailable`. Kennzeichnen oder entfernen.
-- Die Pin-Belegung in `waage-eg.yaml` ist D1-Mini-Notation und passt nicht zu
-  einem ESP32. Der Durchsicht-Taster liegt laut Dashboard-Text auf GPIO34 mit
-  externem 10-kΩ-Pull-up.
-- **WLAN-Signal beobachten:** −76 dBm gegenüber −67 dBm am alten Board. Laut
-  eigener Dashboard-Doku wird es unter −80 dBm wackelig.
+Bis hierher war der Bericht eine HA-Geschichte. Beim Versuch, aus dem Repo zu
+flashen, kam heraus, dass das gar nicht ging: **`bienenwaage.yaml` war nie
+eingecheckt.** Im Root lagen nur die drei ESP8266-Stockdateien, und
+`packages/waage-basis.yaml` trug einen `esp8266:`-Block mit `board: d1_mini`.
+Ein Flash von dort hätte nicht etwa Schaden angerichtet, sondern schlicht nicht
+gebaut — ESP8266-Firmware lässt sich auf einen ESP32 nicht aufspielen.
+
+An die Datei kam ich selbst nicht heran (Supervisor gesperrt, siehe Punkt 9),
+sie kam per Hand. Beim Einchecken fielen zwei Dinge auf.
+
+**Erstens ein Fehler, den die Umbenennung aus Punkt 3 verursacht hatte:**
+
+```yaml
+- platform: homeassistant
+  id: wachhalten_ha
+  entity_id: input_boolean.stockwaage_wachhalten
+```
+
+Diesen Helfer hatte ich umbenannt. Der `homeassistant`-Sensor holt seinen
+Zustand über genau diese entity_id — sie zeigte danach ins Leere. Folge:
+`wachhalten_ha` bekommt nie einen Zustand, `deep_sleep.prevent` läuft nicht,
+und der `wait_until` im `on_boot` fällt jedes Mal in seinen 30-Sekunden-Timeout.
+Das Wachhalten über HA war damit tot, ohne dass irgendwo eine Fehlermeldung
+stand.
+
+> **Die Konsumentensuche vor einer Umbenennung endet nicht in Home Assistant.**
+> Dashboards, Automationen, Skripte, Szenen und Helfer waren vollständig
+> geprüft — die Firmware nicht, weil sie nicht lesbar war. Genau dort lag die
+> einzige verbliebene Referenz. Wer die Datei nicht lesen kann, muss danach
+> fragen, statt anzunehmen, dass HA alle Konsumenten kennt.
+
+Die Datei vermerkt jetzt im Kopf, dass dies die **einzige** Stelle ist, an der
+die Firmware umgekehrt eine HA-Entity referenziert.
+
+**Zweitens die Aufräumaktion, die der Dateikopf selbst als ausstehend
+markiert hatte.** Entfernt wurden `waage-eg.yaml`, `waage-stock2.yaml`,
+`waage-stock3.yaml`, der `esp8266:`-Block aus der Basis und die nur von ihm
+gelesene Substitution `board: d1_mini`; in `bienenwaage.yaml` fiel das dazu
+gehörende `esp8266: !remove` weg. `waage-eg-notes.md` und
+`waage-eg-claude-code-kontext.md` bleiben als Archiv stehen.
+
+Mit dem Block ist `restore_from_flash: true` entfallen — eine der harten
+Regeln in `CLAUDE.md`. Sie wurde nicht gelöscht, sondern umformuliert: auf dem
+ESP8266 zwingend, auf dem ESP32 ohne Entsprechung, und **wer wieder ein
+ESP8266-Gerät anlegt, muss beides zurückholen**, dann aber in dessen
+Gerätedatei.
+
+**Belegt statt behauptet:** Diff der aufgelösten Konfiguration vor und nach dem
+Aufräumen. Einziger Unterschied ist die entfernte Zeile `board: d1_mini`. Alle
+Entity-Namen, Globals, Pins und Lambdas identisch.
+
+> **Der Diff ist nicht deterministisch** — hier zum ersten Mal aufgefallen.
+> Zwei Läufe von `esphome config` über denselben, unveränderten Baum
+> vertauschen die Schlüssel `tag` und `level` in den `logger.log`-Aktionen.
+> Falschmeldungen also. Gegenprüfen durch zweimaliges Laufen auf demselben
+> Baum, oder gleich `diff <(sort vorher.txt) <(sort nachher.txt)`. In
+> `CLAUDE.md` ergänzt.
+
+## 8. GPIO33 weckt nicht
+
+Der Kippschalter hält das Gerät wach, holt es aber nicht aus dem Schlaf.
+
+**Die naheliegenden Erklärungen waren falsch.** Vermutet hatte ich einen
+fehlenden `wakeup_pin` oder einen verkehrten Weckpegel. Die Datei entlastet
+beides:
+
+```yaml
+wakeup_pin:
+  number: GPIO33
+  inverted: true          # -> level = !is_inverted() = 0, weckt auf LOW
+wakeup_pin_mode: KEEP_AWAKE
+```
+
+`deep_sleep_esp32.cpp` rechnet `level = !wakeup_pin_->is_inverted()`, hier also
+`esp_sleep_enable_ext0_wakeup(GPIO33, 0)`. Der Schalter zieht gegen GND, liefert
+also LOW. Das ist korrekt.
+
+**Der Denkfehler steckte in der Pin-Begründung**, und sie klang plausibel:
+GPIO33 sei weckfähig *und* habe einen internen Pull-up, anders als GPIO34-39.
+Stimmt im Wachbetrieb — im Tiefschlaf nicht:
+
+> ESPHome setzt den Pull-up über den digitalen GPIO-Treiber, also über die
+> IO-MUX-Konfiguration. Sobald `esp_sleep_enable_ext0_wakeup()` greift, wird
+> der Pad auf die **RTC-Funktion** umgemuxt; dort gilt nur, was über
+> `rtc_gpio_pullup_en()` gesetzt wurde, und das ruft ESPHome nicht auf. Der
+> Pin schwebt im Schlaf.
+
+Ein schwebender Pin hat keinen definierten Ruhepegel: entweder Phantomweckungen,
+oder `KEEP_AWAKE` greift beim Einschlafen und das Gerät legt sich gar nicht erst
+hin. Beides sieht von außen aus wie „der Schalter tut nichts". **Abhilfe: extern
+10 kΩ von GPIO33 nach 3V3** — dieselbe Beschaltung wie an GPIO34, aber aus einem
+anderen Grund: nicht weil der Pin keinen internen Pull-up *hat*, sondern weil er
+ihn im Schlaf *verliert*.
+
+**Zweiter Verdächtiger, jetzt im Test:** GPIO33 hing gleichzeitig am
+`binary_sensor` `wachhalten_schalter` (digitale IO-Matrix) und am `wakeup_pin`
+(RTC-Mux). Der Sensor ist testweise entfernt, mitsamt **beider**
+`allow_other_uses` — die waren nur nötig, weil sich zwei Verwender den Pin
+teilten; mit nur noch einem wäre die Freigabe selbst ein Validierungsfehler.
+`esphome config` bestätigt das: Exit 0, GPIO33 steht in der aufgelösten
+Konfiguration nur noch einmal.
+
+Auswertung des Tests:
+
+- **Weckt es jetzt** → der Konflikt ist nachgewiesen. Der Sensor kommt dann
+  *nicht* einfach zurück; die Anzeige muss über `esp_sleep_get_wakeup_cause()`
+  gelöst werden statt über eine zweite Pin-Belegung.
+- **Weckt es nicht** → der Block gehört wieder her, Zustand in der
+  Git-Historie.
+
+Solange der Sensor draußen ist, wird
+`binary_sensor.bienenwaage_wachhalten_schalter` nach dem Flash `unavailable`;
+auf dem Dashboard hängt daran die Kachel „Schalter am Gerät" in der Übersicht.
+
+## 9. Offene Punkte
+
+- **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
+  −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
+  Masse steigen.
+- **10 kΩ von GPIO33 nach 3V3 nachrüsten**, siehe Punkt 8. Hardware, unabhängig
+  von jeder YAML-Änderung.
+- **Den GPIO33-Test auswerten** und je nach Ergebnis den `binary_sensor`
+  zurückholen oder die Anzeige neu lösen.
+- **Feste IP vergeben.** Für MAC `20:50:0D:CA:B2:BC` eine Lease-Reservierung in
+  der FRITZ!Box. Das alte Board hatte `.171`, dieses hat `.115` — ohne
+  Reservierung wandert die Adresse wieder. `bienenwaage.local` ist keine
+  Alternative: die mDNS-Auflösung ist hier nachweislich unzuverlässig, daran
+  scheiterte schon die erste Adoption.
+- **Kippschalter wieder umlegen**, sonst gibt es keinen Tiefschlaf.
+- **Kein Supervisor-Zugriff über den MCP-Server.** `/addons` antwortet
+  `Unauthorized`, und auch der Umweg über den HA-Core-Proxy `supervisor/api`
+  wird abgewiesen. Damit sind Add-on-Dateien und die WebSocket-Schnittstelle
+  des Device Builders von außen nicht lesbar — jede YAML muss von Hand kommen.
+- **Helfer-Titel.** Die drei Rechenhelfer heißen in Einstellungen → Helfer
+  weiterhin „Stockwaage …". Kosmetisch; Umbenennen ginge nur über Löschen und
+  Neuanlegen und kostete die Historie.
+- **WLAN-Signal beobachten:** −76 dBm gegenüber −67 dBm am alten Board. Unter
+  −80 dBm wird es laut eigener Dashboard-Doku wackelig.
