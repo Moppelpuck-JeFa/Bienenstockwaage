@@ -1253,16 +1253,58 @@ Nebenwirkung sein `setup()` hat.** Bei GPIO-Komponenten ist das
 Einrichten des Pins genau so eine Nebenwirkung, und sie ist im YAML
 unsichtbar. Der Kommentar steht jetzt richtig an der Stelle.
 
-## 21. Offene Punkte
+## 21. Bestätigt: der Tiefschlaf läuft wieder
+
+Nach dem Flash mit dem zurückgeholten `binary_sensor`:
+
+| Entity | Wert | |
+|---|---|---|
+| `binary_sensor.bienenwaage_wachhalten_schalter` | **off** (18:23:14) | wieder da, Pin liest HIGH — Schalter aus, Pull-up zieht |
+| `binary_sensor.bienenwaage_verbindung` | **off** (18:25:09) | **eingeschlafen**, rund 200 s nach dem Boot |
+| Kalibrierfaktor | −14.081,15 | unverändert seit 12:09 |
+| „Kalibriert bei" | 20,9 °C | unverändert |
+| WLAN-Signal | −79 dBm | |
+
+Damit ist Punkt 20 belegt: **es lag am fehlenden `binary_sensor`.** Ist er da,
+richtet sein `setup()` den Pad ein, `digital_read()` liefert HIGH,
+`prepare_to_sleep_()` gibt frei — und `run_duration` greift wie vorgesehen.
+
+Nebenbei der **dritte Flash in Folge ohne Verlust der Kalibrierung**. Die
+Erklärung über die eigenen NVS-Schlüssel auf dem ESP32 trägt weiter.
+
+### Was der ganze GPIO33-Test unterm Strich ergeben hat
+
+Angeordnet war er, um die Doppelnutzung von GPIO33 als Ursache für „der
+Schalter weckt das schlafende Gerät nicht" zu prüfen. Das Ergebnis:
+
+- **Die Doppelnutzung ist nicht die Ursache — sie ist Voraussetzung.** Ohne
+  den zweiten Verwender bleibt der Pin unkonfiguriert und das Gerät schläft
+  überhaupt nicht mehr ein.
+- **Die Pull-up-Erklärung war falsch** (Punkt 19). ESPHome setzt den Pull für
+  den Schlaf selbst.
+- **Die Ursache fürs Nicht-Wecken ist damit weiter offen** — beide Kandidaten
+  sind verbraucht.
+
+Was als nächstes zu prüfen wäre, jetzt sauber möglich, weil das Gerät gerade
+schläft und die Funkstrecke ohne `fast_connect` läuft: Kippschalter umlegen
+und sehen, ob die Betriebszeit unmittelbar danach neu anfängt. Bleibt es weg,
+ist die serielle Konsole der einzige Weg, der den Weckgrund unabhängig vom
+WLAN zeigt (`esp_sleep_get_wakeup_cause()` im Startlog).
+
+## 22. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
   Masse steigen.
 - **`use_address` nachziehen, falls die Lease wandert.** Steht fest auf
   `192.168.1.115`. Erledigt sich mit der Lease-Reservierung.
-- **Ursache fuer „Schalter weckt nicht" ist wieder offen** (Punkt 19). Der
-  Pull-up ist verbaut, die bisherige Erklaerung widerlegt. Zuerst zu klaeren:
-  fiel wirklich das Wecken aus, oder nur das Melden ueber WLAN?
+- **Ursache fuer „Schalter weckt nicht" ist offen** (Punkte 19 und 21). Beide
+  Kandidaten sind verbraucht: der Pull-up ist verbaut UND ESPHome setzt ihn
+  ohnehin selbst, und die Doppelnutzung von GPIO33 ist noetig statt schaedlich.
+  Naechster Schritt: im Tiefschlaf den Schalter umlegen und sehen, ob die
+  Betriebszeit neu anfaengt. Bleibt das Geraet weg, zeigt nur die serielle
+  Konsole den Weckgrund (esp_sleep_get_wakeup_cause() im Startlog).
+  Weiterhin moeglich: das Wecken ging, nur das Melden ueber WLAN nicht.
 - ~~Den GPIO33-Test auswerten.~~ **Erledigt** (Punkt 20): Der `binary_sensor`
   ist zurück, weil ohne ihn der Tiefschlaf gar nicht mehr zustande kommt. Die
   Doppelbelegung ist als Ursache fürs Nicht-Wecken ausgeschlossen.
@@ -1271,10 +1313,8 @@ unsichtbar. Der Kommentar steht jetzt richtig an der Stelle.
   Reservierung wandert die Adresse wieder. `bienenwaage.local` ist keine
   Alternative: die mDNS-Auflösung ist hier nachweislich unzuverlässig, daran
   scheiterte schon die erste Adoption.
-- **Den Schlafzyklus nachpruefen** (Punkt 18). Der Schalter ist seit 17:14 aus,
-  der Tiefschlaf laeuft wieder. Kommt in einer Stunde genau EIN Messwert, ist
-  der Takt in Ordnung. Kommen viele, weckt sich das Geraet selbst - dann liegt
-  es nicht am Pull-up (Punkt 19) und die Suche faengt neu an.
+- ~~Den Schlafzyklus nachpruefen.~~ **Erledigt** (Punkt 21): Das Geraet ist
+  am 29.08.2026 um 18:25 rund 200 s nach dem Boot eingeschlafen.
 - **Bei einem Boardtausch die Chip-Revision pruefen.** `minimum_chip_revision:
   "3.1"` bindet die Firmware an diese Hardware (Punkt 16); auf einem aelteren
   ESP32 startet das Bild nicht.
