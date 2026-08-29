@@ -196,7 +196,13 @@ api:
   reboot_timeout: 0s
 
 ota:
+  # Die id ist kein Selbstzweck: nur ueber sie kann eine Geraetedatei den
+  # Eintrag per !extend um eigene Trigger ergaenzen. bienenwaage.yaml haengt
+  # dort ein deep_sleep.prevent ein - ohne id entstuende ein ZWEITER
+  # ota-Eintrag (Listen aus Packages werden aneinandergehaengt, nicht ueber
+  # die id zusammengefuehrt) und die Konfiguration waere ungueltig.
   - platform: esphome
+    id: ota_esphome
     password: !secret ota_password
 
 logger:

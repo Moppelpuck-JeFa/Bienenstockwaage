@@ -639,11 +639,138 @@ hängt am Netzteil; `run_duration` von 200 s auf etwa 600 s zu erhöhen oder den
 Tiefschlaf ganz abzuschalten, löst das Problem an der Wurzel und macht
 nebenbei alle elf Haltesensoren überflüssig. Das steht weiterhin offen.
 
-## 14. Offene Punkte
+## 14. Das Gerät ließ sich nicht mehr flashen — zwei Ursachen, eine davon hausgemacht
+
+Meldung: „gerät lässt sich nicht flashen, da es für ESPHome auch in der
+Wachphase nicht erreichbar ist". Dahinter steckten zwei voneinander
+unabhängige Fehler, die sich gegenseitig verdeckt haben.
+
+### 14.1 Das Wachhalten war stumm ausgefallen — durch die Umbenennung
+
+Die Firmware, die auf dem ESP32 **läuft**, wurde vor dem 28.08.2026
+geflasht. Sie enthält:
+
+```yaml
+- platform: homeassistant
+  id: wachhalten_ha
+  entity_id: input_boolean.stockwaage_wachhalten
+```
+
+Am 28.08.2026 wurde der Helfer in der Entity-Registry auf
+`input_boolean.bienenwaage_wachhalten` umbenannt. Damit gab es die alte ID
+nicht mehr. Der `homeassistant`-binary_sensor bekommt dann **nie** einen
+Zustand: `on_state` feuert nicht, `deep_sleep.prevent` läuft nicht, und der
+`wait_until` im Weckfenster läuft jedes Mal in seinen 30-s-Timeout.
+
+Genau davor warnt der Kommentar an der Stelle — geschrieben, nachdem der
+Fehler beim Nachziehen der Datei aufgefallen war. Übersehen wurde dabei, dass
+die **Korrektur in der Datei den Schaden am Gerät nicht behebt**: sie wirkt
+erst mit dem nächsten Flash. Genau der war dadurch blockiert.
+
+Belegt am 29.08.2026: `input_boolean.bienenwaage_wachhalten` stand seit 12:12
+auf `on`, das Gerät war um 12:24 trotzdem wieder weg.
+
+**Der zweite Weg war gleichzeitig tot.** Der Kippschalter am Gehäuse wirkt
+über `wakeup_pin_mode: KEEP_AWAKE` an GPIO33 — und GPIO33 schwebt im
+Tiefschlaf, solange der externe 10-kΩ-Pull-up fehlt (Punkt 8). Beide
+Wachhaltewege gleichzeitig aus, aus zwei völlig verschiedenen Gründen.
+
+**Behoben ohne Flash:** In HA einen zweiten `input_boolean` angelegt und
+seine entity_id auf `input_boolean.stockwaage_wachhalten` gesetzt — exakt die
+ID, nach der die laufende Firmware fragt. Er steht auf `on` und hat eine
+eigene Kachel in der Übersicht, mit dem Hinweis, dass er nach dem Flash zu
+löschen ist. Der Helfer-Name lässt sich dabei nicht wiederverwenden: der
+umbenannte Helfer trägt intern weiterhin die object_id `stockwaage_wachhalten`
+und blockiert den Namen. Angelegt wurde er deshalb als „Stockwaage Wachhalten
+OTA-Brücke" und danach die entity_id gesetzt.
+
+> **Die allgemeine Lehre**, teurer als der Einzelfall: Eine
+> Firmware-Referenz auf eine HA-Entity darf nicht umbenannt werden, ohne
+> vorher zu flashen — oder ohne die alte ID als Brücke stehen zu lassen. Wird
+> die Referenz gebraucht, um überhaupt flashen zu können, ist die Reihenfolge
+> nicht mehr frei wählbar: **erst flashen, dann umbenennen.** Umgekehrt sperrt
+> man sich aus.
+
+### 14.2 ESPHome suchte das Gerät über mDNS
+
+Der zweite Grund steckte im aufgelösten Config und war im YAML nicht zu
+sehen. Ohne `use_address` setzt ESPHome die Adresse selbst:
+
+```
+use_address: stockwaage.local
+```
+
+mDNS ist in diesem Netz nachweislich nicht auflösbar — daran scheiterte schon
+die erste Adoption. Das Device-Builder-Add-on zeigt das Gerät deshalb auch
+dann als OFFLINE, wenn es wach ist und HA längst über die API damit redet:
+**HA hat die IP im Config-Entry stehen, das Add-on hat nur den Namen.** Die
+beiden Wege sind unabhängig, und aus „HA sieht es" folgt nicht „ESPHome
+erreicht es".
+
+Gesetzt: `use_address: 192.168.1.115`. Das ist ausdrücklich **nicht**
+`manual_ip` — auf dem ESP32 ändert sich nichts, er bleibt am DHCP. Wandert
+die Lease, schlägt nur der Upload fehl und die Zeile ist nachzuziehen;
+unerreichbar wird das Gerät dadurch nie. Die feste Lease in der FRITZ!Box
+bleibt der saubere Weg.
+
+### 14.3 Ein laufendes OTA fällt in den Tiefschlaf
+
+Beim Prüfen mitgefunden, noch nicht aufgetreten: `deep_sleep` schaltet nach
+`run_duration` ab, ganz gleich ob gerade ein Update läuft. Bei 200 s Wachzeit
+abzüglich 90 s Einschwingen bleibt für einen ESP32-Upload zu wenig Luft.
+
+`packages/waage-basis.yaml` hat dafür eine `id: ota_esphome` bekommen — nur
+über sie kann die Gerätedatei den Eintrag per `!extend` ergänzen; ein zweiter
+`ota:`-Eintrag wäre ein Validierungsfehler. In `bienenwaage.yaml`:
+
+```yaml
+ota:
+  - id: !extend ota_esphome
+    on_begin:
+      then: [deep_sleep.prevent: tiefschlaf, ...]
+    on_error:
+      then: [deep_sleep.allow: tiefschlaf, ...]
+```
+
+Das ersetzt das Wachhalten nicht — wach sein muss das Gerät, wenn der Upload
+beginnt. Es verhindert nur, dass ein laufender Upload mittendrin
+abgeschnitten wird.
+
+### 14.4 Prüfung
+
+`esphome config bienenwaage.yaml` ist gültig. Der Diff der **aufgelösten**
+Konfiguration gegen den Stand davor, reihenfolgeunabhängig verglichen, zeigt
+ausschließlich: die beiden OTA-Trigger samt Logzeilen, die neue `id`, und
+
+```
+< use_address: stockwaage.local
+> use_address: 192.168.1.115
+```
+
+Keine Entity, kein Global, kein Messwert hat sich bewegt.
+
+### 14.5 Die Reihenfolge am Gerät
+
+1. **Brücke steht schon auf an** — nichts zu tun.
+2. Eine Schlafperiode abwarten (bis zu 60 min). Beim Aufwachen liest die
+   laufende Firmware `input_boolean.stockwaage_wachhalten`, findet ihn auf
+   `on` und setzt den Tiefschlaf aus. *Gerät wach* bleibt danach an.
+3. Im Device Builder **Install → Wirelessly**. Der Upload geht jetzt an
+   `192.168.1.115` statt an einen nicht auflösbaren Namen.
+4. Nach dem Flash: Kalibrierfaktor und „Kalibriert bei" prüfen.
+5. Danach wirkt wieder `input_boolean.bienenwaage_wachhalten`. Die Brücke und
+   ihre beiden Karten in der Übersicht löschen.
+
+## 15. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
   Masse steigen.
+- **Flashen, dann die Brücke löschen.** Ablauf in Punkt 14.5. Solange
+  `input_boolean.stockwaage_wachhalten` existiert, ist es der einzige Weg,
+  das Gerät wach zu halten — beide anderen sind aus (Punkt 14.1).
+- **`use_address` nachziehen, falls die Lease wandert.** Steht fest auf
+  `192.168.1.115`. Erledigt sich mit der Lease-Reservierung.
 - **10 kΩ von GPIO33 nach 3V3 nachrüsten**, siehe Punkt 8. Hardware, unabhängig
   von jeder YAML-Änderung.
 - **Den GPIO33-Test auswerten** und je nach Ergebnis den `binary_sensor`

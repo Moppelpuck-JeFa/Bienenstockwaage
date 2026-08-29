@@ -360,6 +360,26 @@ wifi:
   # Verbindungsaufbau und damit bares Guthaben in der Tagesbilanz.
   # Setzt voraus, dass sich Kanal und BSSID nicht staendig aendern.
   fast_connect: true
+
+  # --- Uploadziel fuer OTA: IP statt mDNS ---
+  # use_address aendert am GERAET nichts. Es sagt nur dem uebersetzenden
+  # Host, wohin er das Update schickt und wo die Logs abzuholen sind;
+  # ohne die Zeile nimmt ESPHome "${geraete_name}.local", also mDNS.
+  #
+  # Genau das faellt hier aus. mDNS liess sich in diesem Netz schon bei der
+  # ersten Adoption nicht aufloesen, und das Device-Builder-Add-on zeigt das
+  # Geraet deshalb auch dann als OFFLINE, wenn es wach ist und HA laengst
+  # ueber die API damit redet. Der Weg ueber die API und der Weg ueber OTA
+  # sind zwei verschiedene: HA hat die IP im Config-Entry stehen, das
+  # Add-on hat nur den Namen.
+  #
+  # WICHTIG - das ist NICHT dasselbe wie manual_ip weiter unten. Hier wird
+  # keine Adresse auf dem ESP32 gesetzt, der bleibt am DHCP. Wandert die
+  # Lease, schlaegt der Upload mit "connection refused" fehl und diese Zeile
+  # muss nachgezogen werden - unerreichbar wird das Geraet dadurch nie.
+  # Der saubere Weg bleibt die feste Lease in der FRITZ!Box.
+  use_address: 192.168.1.115
+
   # Noch mehr braechte eine feste IP (spart DHCP). Bewusst NICHT gesetzt:
   # das Geraet haengt per DHCP im Netz, und eine falsch geratene
   # Netzmaske oder ein falsches Gateway macht es unerreichbar - im
@@ -570,6 +590,35 @@ deep_sleep:
     # Validierungsfehler. Kommt der binary_sensor zurueck, muss sie an
     # BEIDEN Stellen wieder rein.
   wakeup_pin_mode: KEEP_AWAKE
+
+# --- Ein laufendes OTA darf nicht in den Tiefschlaf fallen ---
+# Der deep_sleep-Komponente ist ein Update egal: laeuft run_duration ab,
+# schaltet sie ab - mitten im Schreiben des Flash. Das Geraet kommt dann
+# zwar wieder hoch (der alte Slot bleibt gueltig, bis das Update vollstaendig
+# ist), aber jeder Versuch endet gleich, und aus 200 s Wachzeit abzueglich
+# 90 s Einschwingen bleibt zu wenig Luft fuer einen ESP32-Upload.
+#
+# on_begin setzt den Tiefschlaf fuer die Dauer des Uploads aus. Nach einem
+# erfolgreichen OTA startet das Geraet ohnehin neu; scheitert es, gibt
+# on_error den Tiefschlaf wieder frei, damit ein missglueckter Versuch das
+# Geraet nicht dauerhaft wach und am Strom haengen laesst.
+#
+# Das ersetzt das Wachhalten NICHT: um ueberhaupt an das Geraet
+# heranzukommen, muss es wach sein, wenn der Upload beginnt. Es verhindert
+# nur, dass ein bereits laufender Upload mittendrin abgeschnitten wird.
+#
+# !extend statt eines eigenen ota-Eintrags - siehe die Begruendung an der
+# id in packages/waage-basis.yaml.
+ota:
+  - id: !extend ota_esphome
+    on_begin:
+      then:
+        - deep_sleep.prevent: tiefschlaf
+        - logger.log: "OTA gestartet - Deep Sleep ausgesetzt"
+    on_error:
+      then:
+        - deep_sleep.allow: tiefschlaf
+        - logger.log: "OTA fehlgeschlagen - Deep Sleep wieder frei"
 
 # --- Schlafdauer an das Messintervall koppeln ---
 # Ohne das gibt es zwei Takte, die nichts voneinander wissen: sleep_duration
