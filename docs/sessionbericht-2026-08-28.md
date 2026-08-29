@@ -425,7 +425,64 @@ auf `off` und nicht auf `unavailable`. Das ist Absicht — im Diagnose-Dump
 trägt sie `is_status_binary_sensor: true` und ist genau dafür da, den
 Verbindungszustand anzuzeigen.
 
-## 10. Offene Punkte
+## 10. Dashboard von der Verbindungsqualität entkoppelt
+
+Nachdem `subscribe_logs: false` nicht gereicht hat, wurde die Anzeige von der
+Verbindung getrennt, statt weiter an der Verbindung zu drehen. Begründung: Bei
+einer Waage, die stündlich misst, ist „der zuletzt gemessene Wert" ohnehin die
+ehrlichere Darstellung als „gerade nicht verbunden". Die Wachzeit blieb auf
+Wunsch unangetastet.
+
+**Vier Template-Helfer**, die den letzten gültigen Wert halten:
+
+| Helfer | Quelle |
+|---|---|
+| `sensor.bienenwaage_gewicht_zuletzt` | `sensor.bienenwaage_gewicht` |
+| `sensor.bienenwaage_temperatur_zuletzt` | `sensor.bienenwaage_temperatur` |
+| `sensor.bienenwaage_tagesbilanz_zuletzt` | `sensor.bienenwaage_tagesbilanz` |
+| `sensor.bienenwaage_gewichtsanderung_zuletzt` | `sensor.bienenwaage_gewichtsanderung` |
+
+Alle nach demselben Muster:
+
+```jinja
+{% set v = states('sensor.…') %}
+{{ v if v not in ['unknown','unavailable'] else this.state }}
+```
+
+Der Skill bestätigt, dass es dafür keinen dedizierten Helfer gibt — „letzten
+Wert halten" ist genau der Fall, für den der Template-Helfer als Notausgang
+vorgesehen ist. Angelegt über den Config-Flow, nicht als YAML.
+
+**Bewusst ohne `state_class`.** Mit einer wäre eine zweite, inhaltlich
+identische Langzeitstatistik entstanden. Die Statistik gehört weiter zu den
+Originalsensoren, und genau deshalb bleiben auch alle `statistics-graph`- und
+`history-graph`-Karten auf den Originalen: die lesen aus dem Recorder und
+funktionieren unabhängig von der Verbindung ohnehin.
+
+**Additiv, nicht ersetzend.** Die bestehenden Helfer wurden *nicht* umgehängt —
+das wäre die dritte Quelländerung an Entities mit Historie gewesen, für einen
+reinen Anzeigezweck. Die vier neuen Helfer lassen sich rückstandsfrei löschen.
+
+**Geändert im Dashboard**, nur in der Ansicht *Übersicht*: die Badges Gewicht
+und Temperatur, die Kacheln Gewicht, Bilanz 24 h, Änderung und Temperatur. Die
+Ansicht *Technik* bleibt auf den Originalsensoren — dort ist „nicht verfügbar"
+eine ehrliche Diagnoseinformation und keine Störung. Die Karte „Zuletzt
+aktualisiert" zeigt jetzt die letzte Übertragung und dazu, ob das Gerät gerade
+wach ist oder der angezeigte Wert der letzte gemessene ist.
+
+Nebenbei korrigiert: der Tiefschlaf-Text sprach von „120 s Wachzeit", die
+`run_duration` steht aber auf 200 s.
+
+> **Grenze des Verfahrens:** `this.state` überlebt keinen Neustart von Home
+> Assistant. Danach stehen die Haltesensoren wieder auf `unknown`, bis die
+> nächste Messung kommt — bei stündlichem Takt also höchstens eine Stunde.
+
+**Noch nicht verifiziert.** Zum Zeitpunkt des Umbaus (09:03) hatte sich das
+Gerät seit 08:01:58 nicht gemeldet, die Haltesensoren standen deshalb noch auf
+`unknown`. Die Wirkung lässt sich erst nach mindestens zwei aufeinander
+folgenden Schlafphasen beurteilen — siehe den Fehlschluss in Punkt 9.
+
+## 11. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
