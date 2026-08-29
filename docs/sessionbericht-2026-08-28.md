@@ -1435,20 +1435,110 @@ Dasselbe gilt für die object_id `stockwaage_wachhalten` hinter
 unveränderlich ohne Neuanlage — und diese Entity ist die einzige, die die
 **Firmware** referenziert. Daran wird nicht gerührt.
 
-## 24. Offene Punkte
+## 24. Der Schalter weckt. Der Timer — unbekannt.
+
+### Die Daten
+
+| Zeit | Ereignis |
+|---|---|
+| 18:25:09 | eingeschlafen, sauber |
+| **19:21:49** | **erwarteter Timer-Weckvorgang** (3.400 s bei 60 min Messintervall) |
+| 19:21–19:47 | in Home Assistant **nichts** |
+| 19:47:38 | Gerät da, `wachhalten_schalter` = **on** |
+
+**Damit ist die Frage aus den Punkten 8, 19 und 21 beantwortet: ext0
+funktioniert.** Der Kippschalter weckt das schlafende Gerät. Die Diagnose vom
+28.08. („der Schalter weckt nicht") war falsch — was fehlte, war nicht der
+Weckvorgang.
+
+### Und damit kippt auch die zweite Beobachtung
+
+Naheliegend wäre jetzt: „der Timer weckt nicht". **Das lässt sich aus Home
+Assistant heraus nicht sagen**, und zwar grundsätzlich:
+
+> Ein Gerät, das aufwacht und sich nicht verbindet, sieht in HA exakt aus wie
+> eines, das gar nicht aufwacht.
+
+Der FRITZ!Box-Tracker taugt nicht als unabhängiger Zeuge: er stand die ganze
+Zeit auf `home`, weil der Router WLAN-Clients nach dem Abmelden noch eine
+Weile führt. Zwischen 18:25 und 19:47 gibt es also **kein** Indiz in die eine
+oder andere Richtung.
+
+### Die naheliegendste Erklärung — als Vermutung gekennzeichnet
+
+Eine einzige Ursache erklärt beide Beobachtungen dieses Tages:
+
+- **Schalter an** → `KEEP_AWAKE` → das Gerät bleibt wach → beliebig viele
+  Verbindungsversuche → es meldet sich.
+- **Timer-Weckvorgang, Schalter aus** → 200 s Fenster, davon 90 s
+  Einschwingen → **ein** Versuch an einer Strecke bei −77 bis −84 dBm →
+  scheitert oft → unsichtbar.
+
+Dazu passt die Lücke von heute Mittag: zwischen 12:21 und 14:51 kam kein
+Messwert, obwohl das Wachhalten an war. Auch das war ein verpasstes Fenster,
+kein ausgefallener Weckvorgang.
+
+**Das ist plausibel und deshalb gefährlich.** Genau diese Sorte Erklärung ist
+heute zweimal übernommen und zweimal widerlegt worden (Punkte 19 und 20). Sie
+wird hier nicht geglaubt, sondern gemessen.
+
+### Gemessen wird ab jetzt am Gerät
+
+Zwei Diagnose-Entities in `bienenwaage.yaml`:
+
+| Entity | Was sie beantwortet |
+|---|---|
+| **Weckgrund** | `esp_sleep_get_wakeup_cause()` → „Timer", „Schalter (GPIO33)" oder „Neustart" |
+| **Bootnummer** | Zähler in NVS, zählt **jeden** Start — auch die, deren Messung nie ankommt |
+
+Zusammen trennen sie die beiden Fälle, die von außen gleich aussehen:
+
+- Springt die Bootnummer zwischen zwei Meldungen um **mehr als 1**, gab es
+  dazwischen Wachphasen ohne Verbindung → es liegt am WLAN.
+- Bleibt sie stehen, ist das Gerät **wirklich** nicht aufgewacht → es liegt am
+  Tiefschlaf.
+- Und steht nach einer Nacht irgendwo „Timer", weckt der Zeitgeber überhaupt.
+
+Zwei Entscheidungen dabei, beide gegen eine Regel dieses Repos und beide
+begründet:
+
+**`restore_value: yes`** für den Zähler — CLAUDE.md rät bei neuen Globals zu
+`no`. Ein Zähler, der den Tiefschlaf nicht übersteht, zählt aber nichts. Der
+Grund für die Regel (Reihenfolge der `make_preference`-Aufrufe) gilt nur auf
+dem ESP8266; auf dem ESP32 hat jedes Global einen eigenen NVS-Schlüssel.
+Dreimal in Folge bestätigt. **Nach dem Flash trotzdem den Kalibrierfaktor
+prüfen.**
+
+**Veröffentlicht wird sofort nach dem Boot**, nicht im Skript
+`messwerte_veroeffentlichen` — abweichend von der Regel in CLAUDE.md. Der Sinn
+dieser Werte ist ja gerade, auch dann anzukommen, wenn die Messung im
+Weckfenster nicht mehr zustande kommt. Sie hängen deshalb **vor** der
+Einschwingzeit. Beide tragen kein `state_class`: keine Langzeitstatistik, und
+die Kalibrier-Sperre hält sie nicht auf.
+
+### Nach dem Flash
+
+Die beiden Entities entstehen **neu** und bekommen deshalb die IDs, die
+ESPHome vorschlägt — abgeleitet aus `geraete_name: stockwaage`, also
+`text_sensor.stockwaage_weckgrund` und `sensor.stockwaage_bootnummer`. Die
+Umbenennungen vom 28.08. wirken nur auf die damals vorhandenen Entities.
+
+Sie sind danach in der Registry auf `bienenwaage_*` zu ziehen und erst dann
+aufs Dashboard zu nehmen — in dieser Reihenfolge, nicht umgekehrt.
+
+## 25. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
   Masse steigen.
 - **`use_address` nachziehen, falls die Lease wandert.** Steht fest auf
   `192.168.1.115`. Erledigt sich mit der Lease-Reservierung.
-- **Ursache fuer „Schalter weckt nicht" ist offen** (Punkte 19 und 21). Beide
-  Kandidaten sind verbraucht: der Pull-up ist verbaut UND ESPHome setzt ihn
-  ohnehin selbst, und die Doppelnutzung von GPIO33 ist noetig statt schaedlich.
-  Naechster Schritt: im Tiefschlaf den Schalter umlegen und sehen, ob die
-  Betriebszeit neu anfaengt. Bleibt das Geraet weg, zeigt nur die serielle
-  Konsole den Weckgrund (esp_sleep_get_wakeup_cause() im Startlog).
-  Weiterhin moeglich: das Wecken ging, nur das Melden ueber WLAN nicht.
+- ~~Ursache fuer „Schalter weckt nicht".~~ **Erledigt** (Punkt 24): Der
+  Schalter weckt. Die Diagnose vom 28.08. war falsch.
+- **Weckt der Timer?** Offen und aus HA heraus nicht entscheidbar (Punkt 24).
+  Nach dem naechsten Flash beantworten es Weckgrund und Bootnummer.
+- **Weckgrund und Bootnummer nach dem Flash umbenennen** auf `bienenwaage_*`
+  und dann aufs Dashboard nehmen — in dieser Reihenfolge (Punkt 24).
 - ~~Den GPIO33-Test auswerten.~~ **Erledigt** (Punkt 20): Der `binary_sensor`
   ist zurück, weil ohne ihn der Tiefschlaf gar nicht mehr zustande kommt. Die
   Doppelbelegung ist als Ursache fürs Nicht-Wecken ausgeschlossen.

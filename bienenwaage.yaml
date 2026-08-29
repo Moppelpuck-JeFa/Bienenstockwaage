@@ -850,6 +850,77 @@ sensor:
   - id: !extend hx711_raw_counts
     update_interval: 150ms
 
+  # --- Diagnose: die wievielte Wachphase ist das? ---
+  # Siehe die Begruendung beim text_sensor "weckgrund" weiter unten.
+  #
+  # BEWUSST OHNE state_class, wie alle Diagnosewerte hier: sonst landete
+  # eine Bootnummer in der Langzeitstatistik. Ohne state_class faellt der
+  # Wert ausserdem nicht unter die Kalibrier-Sperre - genau richtig, denn
+  # eine Bootnummer ist keine Messung.
+  - platform: template
+    id: boot_nummer
+    name: "Bootnummer"
+    entity_category: diagnostic
+    icon: "mdi:counter"
+    accuracy_decimals: 0
+    update_interval: never
+
+# =====================================================================
+# Diagnose: Weckgrund und Bootzaehler
+# =====================================================================
+# HINZUGEFUEGT AM 29.08.2026, UND ZWAR AUS EINEM KONKRETEN ANLASS.
+#
+# An diesem Tag war zweimal die Frage "ist das Geraet aufgewacht?" nicht
+# zu beantworten, weil Home Assistant sie GAR NICHT BEANTWORTEN KANN:
+#
+#   Ein Geraet, das aufwacht und sich nicht verbindet, sieht in HA exakt
+#   aus wie eines, das gar nicht aufwacht.
+#
+# Beide Male wurde daraufhin geraten, und beide Male falsch. Diese zwei
+# Entities beenden das - sie stellen die Frage dorthin, wo sie
+# beantwortbar ist, naemlich aufs Geraet.
+#
+# ABLESEN:
+#   - "Weckgrund" sagt, WARUM diese Wachphase laeuft. Steht dort nach
+#     einer Nacht "Timer", weckt der Zeitgeber. Steht dort immer nur
+#     "Schalter", hat noch nie ein Timer-Weckvorgang HA erreicht.
+#   - "Bootnummer" zaehlt JEDEN Start, auch die, deren Messung nie
+#     ankommt. Springt sie zwischen zwei Meldungen um mehr als 1, gab es
+#     dazwischen Wachphasen ohne Verbindung - dann liegt es am WLAN und
+#     nicht am Tiefschlaf. Bleibt sie stehen, ist das Geraet wirklich
+#     nicht aufgewacht.
+#
+# Zusammen unterscheiden sie damit die beiden Faelle, die von aussen
+# gleich aussehen. Genau dafuer sind sie da und fuer nichts sonst.
+#
+# VEROEFFENTLICHT WIRD SOFORT NACH DEM BOOT, nicht im Skript
+# messwerte_veroeffentlichen - abweichend von der Regel in CLAUDE.md, und
+# mit Absicht: Der Sinn dieser Werte ist, auch dann anzukommen, wenn die
+# Messung im Weckfenster gar nicht mehr zustande kommt. Sie haengen
+# deshalb vor der Einschwingzeit, nicht dahinter.
+text_sensor:
+  - platform: template
+    id: weckgrund
+    name: "Weckgrund"
+    entity_category: diagnostic
+    icon: "mdi:alarm-check"
+    update_interval: never
+
+globals:
+  # restore_value: yes ist hier ZWINGEND - ein Zaehler, der den Tiefschlaf
+  # nicht uebersteht, zaehlt nichts.
+  #
+  # Auf dem ESP8266 waere das ein Risiko fuer die Kalibrierung gewesen
+  # (die Reihenfolge der make_preference-Aufrufe bestimmt dort den Platz,
+  # siehe Punkt 2 weiter oben). Auf dem ESP32 bekommt jedes Global einen
+  # eigenen NVS-Schluessel - kein Verschieben, kein CRC-Fehler. Am
+  # 29.08.2026 dreimal in Folge bestaetigt. TROTZDEM nach dem Flash den
+  # Kalibrierfaktor pruefen.
+  - id: boot_zaehler
+    type: uint32_t
+    restore_value: yes
+    initial_value: '0'
+
 # --- Kein Webserver im Batteriebetrieb ---
 # Kostet RAM und im Weckfenster Rechenzeit, und die Weboberflaeche ist bei
 # 200 s Wachzeit ohnehin kaum bedienbar. Wer sie zum Debuggen braucht,
@@ -903,6 +974,38 @@ esphome:
         # schliefe ein Geraet, das die API nicht erreicht, mit dem
         # Rueckfallwert statt mit dem eingestellten Intervall.
         - script.execute: schlafdauer_koppeln
+
+        # Weckgrund und Bootnummer SOFORT setzen - vor der Einschwingzeit
+        # und vor jedem wait_until. Die Zustaende liegen dann bereit, bevor
+        # die API ueberhaupt verbunden ist; ESPHome schickt sie beim
+        # Verbindungsaufbau mit. Damit kommen sie auch dann an, wenn die
+        # Messung im Weckfenster nicht mehr zustande kommt.
+        #
+        # esp_sleep_get_wakeup_cause() liest RTC-Register und ist den
+        # ganzen Lauf ueber gueltig. <esp_sleep.h> kommt ueber
+        # deep_sleep_component.h herein, das dieses Geraet ohnehin einbindet.
+        - lambda: |-
+            id(boot_zaehler) += 1;
+            id(boot_nummer).publish_state(id(boot_zaehler));
+            const char *grund;
+            switch (esp_sleep_get_wakeup_cause()) {
+              case ESP_SLEEP_WAKEUP_TIMER:
+                grund = "Timer";
+                break;
+              case ESP_SLEEP_WAKEUP_EXT0:
+                grund = "Schalter (GPIO33)";
+                break;
+              case ESP_SLEEP_WAKEUP_UNDEFINED:
+                // Kein Tiefschlaf davor: Netzteil, Reset-Taster oder OTA.
+                grund = "Neustart";
+                break;
+              default:
+                grund = "Sonstiges";
+                break;
+            }
+            id(weckgrund).publish_state(grund);
+            ESP_LOGI("waage", "Boot #%u, Weckgrund: %s",
+                     (unsigned) id(boot_zaehler), grund);
 
         # ERST EINSCHWINGEN LASSEN, DANN AUF HOME ASSISTANT WARTEN -
         # und nicht umgekehrt.
