@@ -318,7 +318,66 @@ Solange der Sensor draußen ist, wird
 `binary_sensor.bienenwaage_wachhalten_schalter` nach dem Flash `unavailable`;
 auf dem Dashboard hängt daran die Kachel „Schalter am Gerät" in der Übersicht.
 
-## 9. Offene Punkte
+## 9. Warum die Entities im Schlaf leer sind
+
+Am Morgen des 29.08. standen alle Entities auf `unavailable`, was vorher nicht
+so war. Der erste Verdacht — das Gerät sei ausgefallen — war falsch: die
+Stundenstatistik von `sensor.bienenwaage_gewicht` zeigt **17 lückenlose
+Stunden** von 13:00 bis 05:00, jede mit Messwert. Die Waage hat die ganze Nacht
+zuverlässig gemessen.
+
+**HA behandelt Deep-Sleep-Geräte eigentlich anders.** Meldet ein Gerät beim
+Verbinden `has_deep_sleep`, behält HA die letzten Werte, statt beim Trennen auf
+`unavailable` zu gehen. Das Gerät meldet es auch — nachgesehen im
+Diagnose-Dump der Integration:
+
+```json
+"device_info": { "name": "stockwaage", "has_deep_sleep": true }
+```
+
+Der Mechanismus ist also scharf. Er greift trotzdem nicht, und der Grund steht
+im Log:
+
+```
+02:18:04  disconnect request failed
+          TimeoutAPIError: Timeout waiting for DisconnectResponse after 10.0s
+05:11:54  handshake timeout; disconnecting
+          Home Assistant 2026.8.3 (192.168.1.34): is unresponsive; disconnecting
+```
+
+> **Es kommt darauf an, WIE die Verbindung endet.** Nur ein sauberer,
+> angekündigter Abschied vor dem Einschlafen sagt HA „halt die Werte". Bricht
+> die Verbindung unerwartet ab — Timeout, Reset, „unresponsive" —, wertet HA
+> das als Ausfall und setzt alles auf `unavailable`, `has_deep_sleep` hin oder
+> her.
+
+**Ursache ist die Funkstrecke.** −76 dBm gegenüber −67 dBm am alten Board, also
+rund 8 dB weniger und damit grob ein Sechstel der Empfangsleistung. Auf dem
+alten Board kam der Abschied durch, jetzt nicht mehr zuverlässig. Gleiches
+Gerät, gleiche Firmware-Logik — nur schlechterer Empfang.
+
+**Verstärkt wurde es durch eine HA-Option**, die in den Config-Entry-Options
+stand:
+
+```json
+"options": {"allow_service_calls": true, "subscribe_logs": true}
+```
+
+`subscribe_logs` lässt HA die Logausgabe des Geräts live abonnieren. In einem
+200-Sekunden-Weckfenster auf schwacher Strecke kostet das spürbar Bandbreite,
+und es erklärt die 468 gesammelten Logzeilen samt HA-Meldung „logging too
+frequently, 200 messages". **Am 29.08. auf `false` gesetzt** — sofort wirksam,
+kein Flash nötig, jederzeit zurückzunehmen.
+
+Ob das allein reicht, ist offen: es nimmt Last aus dem Weckfenster, ändert aber
+nichts an der Feldstärke. Die eigentliche Abhilfe bleibt die Funkstrecke.
+
+**Nicht verwechseln:** `binary_sensor.bienenwaage_verbindung` geht beim Trennen
+auf `off` und nicht auf `unavailable`. Das ist Absicht — im Diagnose-Dump
+trägt sie `is_status_binary_sensor: true` und ist genau dafür da, den
+Verbindungszustand anzuzeigen.
+
+## 10. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
@@ -340,5 +399,11 @@ auf dem Dashboard hängt daran die Kachel „Schalter am Gerät" in der Übersic
 - **Helfer-Titel.** Die drei Rechenhelfer heißen in Einstellungen → Helfer
   weiterhin „Stockwaage …". Kosmetisch; Umbenennen ginge nur über Löschen und
   Neuanlegen und kostete die Historie.
-- **WLAN-Signal beobachten:** −76 dBm gegenüber −67 dBm am alten Board. Unter
-  −80 dBm wird es laut eigener Dashboard-Doku wackelig.
+- **Funkstrecke verbessern — der wichtigste Punkt.** −76 dBm gegenüber −67 dBm
+  am alten Board. Unter −80 dBm wird es laut eigener Dashboard-Doku wackelig,
+  und schon jetzt kostet es den sauberen Abschied vor dem Einschlafen (Punkt 9).
+  Standort, Antennenausrichtung oder ein Repeater in Reichweite.
+- **Prüfen, ob `subscribe_logs: false` reicht**, damit die Entities im Schlaf
+  ihre Werte behalten. Falls nicht, bleibt als letzte Stellschraube eine
+  längere Wachzeit — die kostet aber direkt Akkulaufzeit und kommt deshalb
+  zuletzt.
