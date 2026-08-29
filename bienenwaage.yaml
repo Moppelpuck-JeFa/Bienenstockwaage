@@ -164,22 +164,41 @@ substitutions:
   # Rastender Schalter (Kipp-/Schiebeschalter, KEIN Taster) gegen GND.
   # GPIO33 ist weckfaehig (RTC_GPIO8, taugt fuer ext0).
   #
-  # ACHTUNG, HIER STAND EIN DENKFEHLER: Der interne Pull-up dieses Pins
-  # hilft im Tiefschlaf NICHT. ESPHome setzt ihn ueber den digitalen
-  # GPIO-Treiber, also ueber die IO-MUX-Konfiguration. Sobald
-  # esp_sleep_enable_ext0_wakeup() greift, wird der Pad auf die
-  # RTC-Funktion umgemuxt - dort gilt nur, was ueber rtc_gpio_pullup_en()
-  # gesetzt wurde, und das ruft ESPHome nicht auf. Der Pin schwebt also
-  # im Schlaf.
+  # Extern 10 kOhm von GPIO33 nach 3V3, Schalter weiter gegen GND. Der
+  # Widerstand IST VERBAUT (bestaetigt am 29.08.2026).
   #
-  # Ein schwebender Pin hat keinen definierten Ruhepegel: je nachdem, wo
-  # er landet, gibt es Phantomweckungen, oder KEEP_AWAKE greift beim
-  # Einschlafen und das Geraet legt sich gar nicht erst hin.
+  # ---------------------------------------------------------------
+  # ZURUECKGENOMMEN AM 29.08.2026 - hier stand eine falsche Begruendung
+  # ---------------------------------------------------------------
+  # Behauptet war: ESPHome verliere den internen Pull-up im Schlaf, weil
+  # esp_sleep_enable_ext0_wakeup() den Pad auf die RTC-Funktion ummuxe und
+  # dort nur rtc_gpio_pullup_en() zaehle, das ESPHome nicht aufrufe.
   #
-  # DESHALB EXTERN 10 kOhm VON GPIO33 NACH 3V3, Schalter weiter gegen
-  # GND. Gleiche Beschaltung wie bei GPIO34, anderer Grund - nicht weil
-  # der Pin keinen internen Pull-up HAT, sondern weil er ihn im Schlaf
-  # VERLIERT.
+  # DAS IST FUER DIESE ESPHOME-VERSION FALSCH. deep_sleep_esp32.cpp macht
+  # vor dem Einschlafen genau das Noetige:
+  #
+  #   if (this->wakeup_pin_->get_flags() & gpio::FLAG_PULLUP) {
+  #     gpio_sleep_set_pull_mode(gpio_pin, GPIO_PULLUP_ONLY);
+  #   }
+  #   gpio_sleep_set_direction(gpio_pin, GPIO_MODE_INPUT);
+  #   gpio_hold_en(gpio_pin);
+  #
+  # gpio_sleep_set_pull_mode() ist genau die API fuer den Pull WAEHREND des
+  # Schlafs, gpio_hold_en() haelt die Pad-Konfiguration darueber hinweg.
+  # Der Pin schwebt also nicht - auch ohne externen Widerstand nicht.
+  #
+  # Der externe Widerstand bleibt trotzdem richtig: er macht den Ruhepegel
+  # von der Firmware unabhaengig und kostet nichts, solange der Schalter
+  # offen ist. Geschlossen fliessen rund 0,33 mA - und geschlossen heisst
+  # ohnehin "wach".
+  #
+  # FOLGE: Fuer "der Schalter weckt nicht" gibt es keine bestaetigte
+  # Ursache mehr. Naechstliegender Verdacht ist jetzt, dass das WECKEN
+  # funktioniert hat und nur das MELDEN nicht: in derselben Zeit lag die
+  # Funkstrecke bei -84 dBm und fast_connect war auf eine veraltete
+  # BSSID/Kanal-Kombination festgenagelt. Ein Geraet, das aufwacht und
+  # sich nicht verbindet, sieht in Home Assistant genauso aus wie eines,
+  # das gar nicht aufwacht. Nachzumessen ist das nur am Geraet.
   #
   # Geschlossen = LOW = wach.
   pin_wachhalten: GPIO33
@@ -651,10 +670,12 @@ deep_sleep:
   # level = !is_inverted(), hier also 0 - geweckt wird auf LOW, und LOW
   # heisst geschlossener Schalter. Das ist richtig so.
   #
-  # OFFEN (28.08.2026): Das Wecken aus dem Schlaf funktioniert nicht.
-  # Konfiguration und Pegel stimmen; der Verdacht liegt auf dem
-  # schwebenden Pin im Schlaf - siehe die Erlaeuterung bei
-  # pin_wachhalten. Erst den externen 10-kOhm-Pull-up nachruesten.
+  # OFFEN (Stand 29.08.2026): Am 28.08. liess sich das Geraet ueber den
+  # Schalter nicht wecken. Konfiguration und Pegel stimmen, der externe
+  # Pull-up ist verbaut, und die frueher hier notierte Erklaerung mit dem
+  # schwebenden Pin ist widerlegt - siehe pin_wachhalten. Damit ist die
+  # Ursache offen. Zu pruefen ist zuerst, ob ueberhaupt das Wecken
+  # ausfiel oder nur das Melden ueber WLAN.
   wakeup_pin:
     number: ${pin_wachhalten}
     mode:

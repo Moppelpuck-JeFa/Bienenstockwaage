@@ -281,6 +281,13 @@ wakeup_pin_mode: KEEP_AWAKE
 `esp_sleep_enable_ext0_wakeup(GPIO33, 0)`. Der Schalter zieht gegen GND, liefert
 also LOW. Das ist korrekt.
 
+> **WIDERLEGT AM 29.08.2026 — siehe Punkt 19.** Der folgende Absatz behauptet,
+> ESPHome verliere den internen Pull-up des Weckpins im Tiefschlaf. Das stimmt
+> für diese ESPHome-Version nicht: `deep_sleep_esp32.cpp` ruft vor dem
+> Einschlafen `gpio_sleep_set_pull_mode(pin, GPIO_PULLUP_ONLY)` und
+> `gpio_hold_en(pin)` auf. Der Text bleibt stehen, weil die daraus gezogenen
+> Folgerungen den Rest der Sitzung geprägt haben.
+
 **Der Denkfehler steckte in der Pin-Begründung**, und sie klang plausibel:
 GPIO33 sei weckfähig *und* habe einen internen Pull-up, anders als GPIO34-39.
 Stimmt im Wachbetrieb — im Tiefschlaf nicht:
@@ -670,10 +677,12 @@ erst mit dem nächsten Flash. Genau der war dadurch blockiert.
 Belegt am 29.08.2026: `input_boolean.bienenwaage_wachhalten` stand seit 12:12
 auf `on`, das Gerät war um 12:24 trotzdem wieder weg.
 
-**Der zweite Weg war gleichzeitig tot.** Der Kippschalter am Gehäuse wirkt
-über `wakeup_pin_mode: KEEP_AWAKE` an GPIO33 — und GPIO33 schwebt im
-Tiefschlaf, solange der externe 10-kΩ-Pull-up fehlt (Punkt 8). Beide
-Wachhaltewege gleichzeitig aus, aus zwei völlig verschiedenen Gründen.
+**Der zweite Weg schien gleichzeitig tot.** Der Kippschalter am Gehäuse wirkt
+über `wakeup_pin_mode: KEEP_AWAKE` an GPIO33, und nach dem damaligen
+Kenntnisstand (Punkt 8) schwebte GPIO33 im Tiefschlaf. Beides ist inzwischen
+widerlegt — der Pull-up ist verbaut und ESPHome setzt ihn ohnehin, siehe
+Punkt 19. Für die Lage am 29.08. ändert das nichts: der Helfer fehlte
+tatsächlich, und über ihn kam das Gerät nicht heran.
 
 **Behoben ohne Flash:** In HA einen zweiten `input_boolean` angelegt und
 seine entity_id auf `input_boolean.stockwaage_wachhalten` gesetzt — exakt die
@@ -1024,13 +1033,9 @@ Das ist kein Widerspruch zu Punkt 8, sondern dessen Präzisierung:
 - **Wachhalten funktioniert** über den Schalter. `wakeup_pin_mode: KEEP_AWAKE`
   prüft den Pin, während das Gerät **läuft** — und dort ist der interne
   Pull-up des GPIO-Treibers aktiv.
-- **Wecken funktioniert nicht.** Erst beim Übergang in den Tiefschlaf legt
-  `esp_sleep_enable_ext0_wakeup()` den Pad auf die RTC-Funktion um, wo nur
-  `rtc_gpio_pullup_en()` zählt. Der Pin schwebt, der Schalter wird nicht
-  gelesen.
-
-Der externe 10-kΩ-Widerstand von GPIO33 nach 3V3 bleibt damit offen — er
-fehlt für genau eine Richtung.
+- **Wecken funktionierte am 28.08. nicht.** Die hier ursprünglich notierte
+  Erklärung (Pad wird auf RTC-Funktion umgemuxt, Pull-up geht verloren) ist
+  am 29.08. widerlegt worden, siehe Punkt 19. Die Ursache ist wieder offen.
 
 ### Die OTA-Brücke ist entfernt
 
@@ -1090,39 +1095,102 @@ soll.
 
 ### Worauf jetzt zu achten ist
 
-GPIO33 hat weiterhin **keinen externen Pull-up** (offener Punkt seit
-Punkt 8). Im Tiefschlaf legt `esp_sleep_enable_ext0_wakeup()` den Pad auf die
-RTC-Funktion um, wo der über den GPIO-Treiber gesetzte Pull-up nicht mehr
-zählt — der Pin schwebt, und geweckt wird auf **LOW**.
+> Dieser Abschnitt ging noch davon aus, GPIO33 habe keinen externen Pull-up
+> und schwebe im Schlaf. Beides ist mit Punkt 19 hinfällig.
 
-Damit sind zwei Ausgänge möglich, und welcher eintritt, entscheidet sich am
-Gerät und nicht am Schreibtisch:
-
-- **Der Pin bleibt hoch genug** (Reststrom, Leitungskapazität). Dann läuft
-  alles normal: rund 60 min Schlaf, kurze Wachphase, ein Messwert.
-- **Der Pin driftet nach LOW.** Dann weckt sich das Gerät selbst, immer
-  wieder. Erkennbar an einer Betriebszeit, die dauernd bei niedrigen Werten
-  neu anfängt, an Messwerten im Minutentakt statt stündlich, und an einem
-  Gerät, das trotz ausgeschaltetem Schalter kaum offline geht.
-
-Der zweite Fall wäre kein neuer Fehler, sondern die Bestätigung von Punkt 8 —
-und der Grund, den 10-kΩ-Widerstand von GPIO33 nach 3V3 nicht länger
-aufzuschieben.
+Geweckt wird auf **LOW**, der Ruhepegel liegt über den externen 10 kΩ sicher
+auf HIGH. Zu erwarten ist damit der normale Takt: rund 60 min Schlaf, kurze
+Wachphase, ein Messwert.
 
 **Prüfen lässt sich das an genau einer Zahl:** kommt in rund einer Stunde
-**ein** Messwert, stimmt der Takt. Kommen viele, schwebt der Pin.
+**ein** Messwert, stimmt der Takt. Kommen viele, weckt sich das Gerät selbst
+— dann läge es nicht mehr am Pull-up, und die Suche finge neu an.
 
-## 19. Offene Punkte
+## 19. Widerrufen: der Pull-up geht im Schlaf nicht verloren
+
+Der externe 10-kΩ-Widerstand von GPIO33 nach 3V3 **ist verbaut** — bestätigt
+am 29.08.2026. Damit fällt eine Annahme, die seit Punkt 8 durch die halbe
+Sitzung getragen wurde.
+
+Schlimmer: sie war auch inhaltlich falsch. Behauptet war:
+
+> ESPHome setzt den Pull-up über den digitalen GPIO-Treiber. Sobald
+> `esp_sleep_enable_ext0_wakeup()` greift, wird der Pad auf die RTC-Funktion
+> umgemuxt; dort gilt nur, was über `rtc_gpio_pullup_en()` gesetzt wurde, und
+> das ruft ESPHome nicht auf.
+
+Nachgesehen in `components/deep_sleep/deep_sleep_esp32.cpp` (2026.6.5),
+`deep_sleep_()` ab Zeile 95 — unmittelbar vor `esp_deep_sleep_start()`:
+
+```cpp
+if (this->wakeup_pin_->get_flags() & gpio::FLAG_PULLUP) {
+  gpio_sleep_set_pull_mode(gpio_pin, GPIO_PULLUP_ONLY);
+} else if (this->wakeup_pin_->get_flags() & gpio::FLAG_PULLDOWN) {
+  gpio_sleep_set_pull_mode(gpio_pin, GPIO_PULLDOWN_ONLY);
+}
+gpio_sleep_set_direction(gpio_pin, GPIO_MODE_INPUT);
+gpio_hold_en(gpio_pin);
+```
+
+`gpio_sleep_set_pull_mode()` ist genau die API für den Pull **während** des
+Schlafs, `gpio_hold_en()` hält die Pad-Konfiguration darüber hinweg. ESPHome
+kümmert sich also darum, und zwar sichtbar an der Stelle, an der man zuerst
+nachsieht. **Der Pin schwebt nicht — auch ohne externen Widerstand nicht.**
+
+Der externe Widerstand bleibt trotzdem richtig: er macht den Ruhepegel von
+der Firmware unabhängig. Bei geschlossenem Schalter kostet er rund 0,33 mA,
+und geschlossen heißt ohnehin „wach".
+
+### Was daraus folgt
+
+**Für „der Schalter weckt nicht" gibt es keine bestätigte Ursache mehr.** Was
+bleibt, ist die Beobachtung vom 28.08.: Schalter umgelegt, Gerät kam nicht.
+
+Der nächstliegende Verdacht ist jetzt ein anderer, und er passt zeitlich
+genau: in derselben Phase lag die Funkstrecke bei −84 dBm und `fast_connect`
+war auf eine gespeicherte BSSID/Kanal-Kombination festgenagelt (Punkt 15).
+**Ein Gerät, das aufwacht und sich nicht verbindet, sieht in Home Assistant
+exakt aus wie eines, das gar nicht aufwacht.** Beurteilt wurde damals nach
+„erscheint es in HA", und das ist kein Test für ext0.
+
+Sauber testen lässt sich das nur mit dem Gerät in der Hand: Schalter im
+Tiefschlaf umlegen und schauen, ob die Betriebszeit gleich danach neu
+anfängt. Erscheint es dabei in HA, ist ext0 in Ordnung; erscheint es nicht,
+hilft nur die serielle Konsole.
+
+### Die Lehre
+
+Zwei Fehler, derselbe Mechanismus:
+
+1. Der Quelltext wurde für die *eine* Funktion gelesen, die zur Vermutung
+   passte (`esp_sleep_enable_ext0_wakeup`), und nicht für die zwanzig Zeilen
+   davor.
+2. Die Vermutung hat sich dann selbst getragen: sie erklärte das Symptom
+   plausibel, also wurde nicht weiter gesucht — und stand ab da als Tatsache
+   in Kommentaren, in `CLAUDE.md` und in vier Abschnitten dieses Berichts.
+
+**Eine Erklärung, die das Symptom erklärt, ist damit noch nicht belegt.** Der
+Beleg wäre gewesen: den Pegel am Pin im Schlaf zu messen, oder den
+Einschlafpfad vollständig zu lesen. Beides war möglich, beides wurde
+übersprungen.
+
+Die betroffenen Stellen tragen jetzt einen Widerspruchsvermerk statt einer
+Löschung — was daraus gefolgert wurde, hat den Rest der Sitzung geprägt und
+soll nachvollziehbar bleiben.
+
+## 20. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
   Masse steigen.
 - **`use_address` nachziehen, falls die Lease wandert.** Steht fest auf
   `192.168.1.115`. Erledigt sich mit der Lease-Reservierung.
-- **10 kΩ von GPIO33 nach 3V3 nachrüsten**, siehe Punkt 8. Hardware, unabhängig
-  von jeder YAML-Änderung.
+- **Ursache fuer „Schalter weckt nicht" ist wieder offen** (Punkt 19). Der
+  Pull-up ist verbaut, die bisherige Erklaerung widerlegt. Zuerst zu klaeren:
+  fiel wirklich das Wecken aus, oder nur das Melden ueber WLAN?
 - **Den GPIO33-Test auswerten** und je nach Ergebnis den `binary_sensor`
-  zurückholen oder die Anzeige neu lösen.
+  zurückholen oder die Anzeige neu lösen. Wenn das Wecken tatsächlich geht,
+  kann er ohne Umschweife zurück.
 - **Feste IP vergeben.** Für MAC `20:50:0D:CA:B2:BC` eine Lease-Reservierung in
   der FRITZ!Box. Das alte Board hatte `.171`, dieses hat `.115` — ohne
   Reservierung wandert die Adresse wieder. `bienenwaage.local` ist keine
@@ -1130,7 +1198,8 @@ aufzuschieben.
   scheiterte schon die erste Adoption.
 - **Den Schlafzyklus nachpruefen** (Punkt 18). Der Schalter ist seit 17:14 aus,
   der Tiefschlaf laeuft wieder. Kommt in einer Stunde genau EIN Messwert, ist
-  alles in Ordnung; kommen viele, schwebt GPIO33 und der Pull-up ist faellig.
+  der Takt in Ordnung. Kommen viele, weckt sich das Geraet selbst - dann liegt
+  es nicht am Pull-up (Punkt 19) und die Suche faengt neu an.
 - **Bei einem Boardtausch die Chip-Revision pruefen.** `minimum_chip_revision:
   "3.1"` bindet die Firmware an diese Hardware (Punkt 16); auf einem aelteren
   ESP32 startet das Bild nicht.
