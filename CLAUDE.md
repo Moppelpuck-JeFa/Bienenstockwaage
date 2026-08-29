@@ -195,6 +195,13 @@ deshalb ist sie mit g++ testbar.
   im Flash. **Wer wieder ein ESP8266-Gerät anlegt, muss beides zurückholen**,
   und zwar in dessen Gerätedatei, nicht in der Basis.
 - **Kein `calibrate_linear`.**
+- **Der `binary_sensor` auf dem Weckpin ist funktional, nicht kosmetisch.**
+  `deep_sleep` ruft für seinen `wakeup_pin` nie `pin_->setup()` auf — den Pin
+  richtet allein dieser `binary_sensor` ein. Ohne ihn liest `KEEP_AWAKE` einen
+  unkonfigurierten Pad, hält ihn für „Schalter an" und das Gerät schläft nie
+  wieder ein. Am 29.08.2026 am Gerät passiert. Allgemeiner: **bevor eine
+  GPIO-Komponente als „nur Anzeige" entfernt wird, prüfen, was ihr `setup()`
+  nebenbei einrichtet.**
 - **`minimum_chip_revision: "3.1"` bindet die Firmware an dieses Board.** Auf
   einem älteren ESP32 startet das Bild nicht. Bei einem Boardtausch die
   Revision im Startlog prüfen und den Wert notfalls senken. Dasselbe gilt für

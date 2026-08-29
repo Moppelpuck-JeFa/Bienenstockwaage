@@ -1178,7 +1178,82 @@ Die betroffenen Stellen tragen jetzt einen Widerspruchsvermerk statt einer
 Löschung — was daraus gefolgert wurde, hat den Rest der Sitzung geprägt und
 soll nachvollziehbar bleiben.
 
-## 20. Offene Punkte
+## 20. Das Gerät schläft nicht mehr ein — der Diagnosesensor war keiner
+
+Nach dem Flash geht das Gerät nicht mehr in den Tiefschlaf. Der Verlauf der
+Betriebszeit ist eindeutig:
+
+| Zeit | Betriebszeit | |
+|---|---|---|
+| 15:47 | 120 s | Boot nach dem Flash |
+| 16:45 | 3.661 s | |
+| 17:08 | 5.033 s | |
+| **17:41** | **6.973 s** | Schalter war um 17:14 **aus** — trotzdem durchgelaufen |
+
+Und davor, mit der alten Firmware, sah dieselbe Entity ganz anders aus:
+`unavailable` → `unknown` → **90,2 s** — im Stundentakt durch die ganze Nacht,
+von 23:15 über 01:19, 02:18, 03:14, 04:11, 05:09, 07:04 bis 09:57.
+
+**Der Tiefschlaf funktionierte also, bis genau zu diesem Flash.** Damit ist
+die Ursache nicht zu suchen, sondern einzugrenzen: was hat dieser Flash
+geändert?
+
+### Die Ursache
+
+Nicht `fast_connect`, nicht die beiden sdkconfig-Optionen. Es war die
+Entfernung des `binary_sensor wachhalten_schalter` — die am 28.08. als
+Diagnosetest angeordnet worden war, mit der Begründung, er sei „rein zur
+Anzeige in HA".
+
+**Diese Begründung war falsch.** `components/deep_sleep/deep_sleep_component.cpp`:
+
+```cpp
+void DeepSleepComponent::setup() {
+  global_has_deep_sleep = true;
+  this->schedule_sleep_();
+}
+```
+
+Die deep_sleep-Komponente ruft für ihren Weckpin **nie** `pin_->setup()` auf.
+Sie fasst ihn an genau zwei Stellen an: in `deep_sleep_()` über die rohen
+`gpio_sleep_*`-Funktionen kurz vor dem Einschlafen, und in
+`prepare_to_sleep_()` über `digital_read()`.
+
+Im laufenden Betrieb ist der Pad damit **nicht konfiguriert** — weder ist der
+Eingang aktiviert noch der Pull-up gesetzt. Genau das erledigte bisher der
+`binary_sensor`: `GPIOBinarySensor::setup()` ruft `pin_->setup()`
+(bzw. `GPIOBinarySensorStore::setup()` in der Interrupt-Variante), und das ist
+auf dem ESP32 ein `gpio_config()` mit Mode und Pull (`esp32/gpio.cpp:104`).
+
+Ohne ihn liefert `digital_read()` im `prepare_to_sleep_()` einen undefinierten
+Wert. Fällt der auf LOW — und `inverted: true` macht daraus `true` —, heißt
+das für `KEEP_AWAKE` „Schalter an", und der Tiefschlaf wird bei **jedem**
+Schleifendurchlauf erneut verschoben. Das Gerät bleibt für immer wach, und
+zwar ohne dass irgendwo ein Fehler steht.
+
+### Was der Test damit gezeigt hat
+
+Die Doppelnutzung von GPIO33 ist **nicht das Problem, sondern die Lösung.**
+Der `binary_sensor` ist zurück, samt beider `allow_other_uses: true`. Die
+Kachel *Schalter am Gerät* steht wieder in der Übersicht, mit dem Hinweis,
+dass sie nicht nur Anzeige ist.
+
+Warum der Schalter das schlafende Gerät am 28.08. nicht geweckt hat, bleibt
+offen (Punkt 19). Ausgeschlossen ist jetzt aber ein Kandidat: die
+Doppelbelegung war es nicht.
+
+### Die Lehre, und sie ist unbequem
+
+Der Kommentar an dem Block sagte „rein zur Anzeige in HA". Ich habe das
+übernommen, statt es zu prüfen — und den Block auf dieser Grundlage
+herausgenommen. Eine Zeile im Quelltext hätte gereicht.
+
+**Bevor etwas als „nur Anzeige" entfernt wird, gehört geprüft, welche
+Nebenwirkung sein `setup()` hat.** Bei GPIO-Komponenten ist das
+Einrichten des Pins genau so eine Nebenwirkung, und sie ist im YAML
+unsichtbar. Der Kommentar steht jetzt richtig an der Stelle.
+
+## 21. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
   −21.000, siehe Punkt 6. Mit bekanntem Gewicht: die Anzeige muss um dessen
@@ -1188,9 +1263,9 @@ soll nachvollziehbar bleiben.
 - **Ursache fuer „Schalter weckt nicht" ist wieder offen** (Punkt 19). Der
   Pull-up ist verbaut, die bisherige Erklaerung widerlegt. Zuerst zu klaeren:
   fiel wirklich das Wecken aus, oder nur das Melden ueber WLAN?
-- **Den GPIO33-Test auswerten** und je nach Ergebnis den `binary_sensor`
-  zurückholen oder die Anzeige neu lösen. Wenn das Wecken tatsächlich geht,
-  kann er ohne Umschweife zurück.
+- ~~Den GPIO33-Test auswerten.~~ **Erledigt** (Punkt 20): Der `binary_sensor`
+  ist zurück, weil ohne ihn der Tiefschlaf gar nicht mehr zustande kommt. Die
+  Doppelbelegung ist als Ursache fürs Nicht-Wecken ausgeschlossen.
 - **Feste IP vergeben.** Für MAC `20:50:0D:CA:B2:BC` eine Lease-Reservierung in
   der FRITZ!Box. Das alte Board hatte `.171`, dieses hat `.115` — ohne
   Reservierung wandert die Adresse wieder. `bienenwaage.local` ist keine

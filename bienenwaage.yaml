@@ -583,38 +583,66 @@ binary_sensor:
             - deep_sleep.allow: tiefschlaf
             - logger.log: "Wachhalten (HA) aus - Deep Sleep wieder frei"
 
-  # --- Hardwareschalter: ENTFERNT, DIAGNOSEZUSTAND ab 28.08.2026 ---
+  # --- Hardwareschalter: WIEDER DA, und er ist nicht nur Anzeige ---
   #
-  # Hier stand ein gpio-binary_sensor "wachhalten_schalter" auf
-  # ${pin_wachhalten}, rein zur Anzeige in HA - das Wachhalten selbst macht
-  # wakeup_pin_mode: KEEP_AWAKE im deep_sleep-Block, nicht dieser Sensor.
+  # Am 28.08.2026 testweise entfernt, um die Doppelnutzung von GPIO33 als
+  # Ursache fuer "der Schalter weckt nicht" auszuschliessen. Am 29.08.2026
+  # zurueckgeholt, weil der Test ein anderes Ergebnis hatte als erwartet:
   #
-  # WARUM ER RAUS IST: Der Schalter weckt das schlafende Geraet nicht. Der
-  # Weckpfad ist korrekt konfiguriert (ext0 auf LOW, siehe deep_sleep unten),
-  # bleibt aber wirkungslos. Naechster Verdaechtiger ist die Doppelnutzung
-  # von GPIO33: dieser Sensor haengt den Pin an die digitale IO-Matrix,
-  # waehrend esp_sleep_enable_ext0_wakeup() ihn auf den RTC-Mux umlegt.
+  #   OHNE DIESEN BLOCK SCHLAEFT DAS GERAET GAR NICHT MEHR EIN.
   #
-  # Mit ihm sind BEIDE "allow_other_uses: true" entfallen - der hier und
-  # das Gegenstueck am wakeup_pin. Sie waren nur noetig, WEIL sich zwei
-  # Verwender denselben Pin teilten; ESPHome bricht eine Doppelbelegung
-  # sonst hart ab (Exit 2, "Pin 33 is used in multiple places"), und die
-  # Freigabe muss dann an beiden Stellen stehen. Ohne den Sensor gibt es
-  # nur noch einen Verwender, und die Freigabe waere ihrerseits ein
-  # Validierungsfehler ("incorrectly sets allow_other_uses: true").
+  # Der Grund steht in components/deep_sleep/deep_sleep_component.cpp:
   #
-  # WEIST DER TEST DEN KONFLIKT NACH - das Geraet weckt jetzt -, dann
-  # kommt der Sensor NICHT einfach zurueck. Die Anzeige muss dann anders
-  # geloest werden, etwa ueber einen template-binary_sensor, der den
-  # Weckgrund aus esp_sleep_get_wakeup_cause() liest, statt den Pin ein
-  # zweites Mal zu belegen.
+  #   void DeepSleepComponent::setup() {
+  #     global_has_deep_sleep = true;
+  #     this->schedule_sleep_();
+  #   }
   #
-  # WEIST ER NICHTS NACH, gehoert dieser Block wieder her: Zustand siehe
-  # Git-Historie, Commit "GPIO33-Doppelnutzung testweise aufgeloest".
+  # Die deep_sleep-Komponente ruft fuer ihren Weckpin NIE pin_->setup()
+  # auf. Sie fasst den Pin nur an zwei Stellen an: in deep_sleep_() ueber
+  # die rohen gpio_sleep_*-Funktionen kurz vor dem Einschlafen, und in
+  # prepare_to_sleep_() ueber digital_read().
   #
-  # FOLGE IN HOME ASSISTANT: binary_sensor.bienenwaage_wachhalten_schalter
-  # verschwindet und wird unavailable. Auf dem Dashboard "Bienenwaage"
-  # haengt daran eine Kachel in der Uebersicht ("Schalter am Geraet").
+  # Damit ist der Pad im laufenden Betrieb NICHT konfiguriert - weder
+  # Eingang aktiviert noch Pull-up gesetzt. Das erledigte bisher genau
+  # dieser binary_sensor: gpio_binary_sensor ruft in seinem setup()
+  # pin_->setup() auf, und das ist auf dem ESP32 ein gpio_config() mit
+  # Mode und Pull (esp32/gpio.cpp:104).
+  #
+  # Ohne ihn liefert digital_read() im prepare_to_sleep_() einen
+  # undefinierten Wert. Faellt der auf LOW - und "inverted: true" macht
+  # daraus true -, dann heisst das fuer KEEP_AWAKE "Schalter an", und der
+  # Tiefschlaf wird bei JEDEM Schleifendurchlauf erneut verschoben. Das
+  # Geraet bleibt fuer immer wach, ohne dass irgendwo ein Fehler steht.
+  #
+  # DIESER BLOCK IST ALSO FUNKTIONAL, NICHT KOSMETISCH. Wer ihn wieder
+  # herausnimmt, muss den Pin anderweitig einrichten - der Kommentar von
+  # damals ("rein zur Anzeige in HA") war schlicht falsch.
+  #
+  # Was der Test damit gezeigt hat: Die Doppelnutzung ist nicht das
+  # Problem, sie ist die Loesung. Warum der Schalter das schlafende Geraet
+  # am 28.08. nicht geweckt hat, ist weiter offen - siehe Sessionbericht
+  # Punkt 19 und 20.
+  - platform: gpio
+    id: wachhalten_schalter
+    name: "Wachhalten (Schalter)"
+    entity_category: diagnostic
+    icon: "mdi:sleep-off"
+    pin:
+      number: ${pin_wachhalten}
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+      # Derselbe Pin dient unten als Weckpin. ESPHome verweigert eine
+      # Doppelbelegung sonst hart (Exit 2, "Pin 33 is used in multiple
+      # places") - allow_other_uses ist die dafuer vorgesehene Freigabe
+      # und MUSS an BEIDEN Stellen stehen, sonst meldet die Validierung
+      # "incorrectly sets allow_other_uses: true".
+      allow_other_uses: true
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 50ms
 
 # Eigener API-Key / OTA-Passwort nur fuer dieses Geraet waere hier
 # moeglich (Werte aus dieser Datei haben Vorrang vor denen aus dem
@@ -682,10 +710,7 @@ deep_sleep:
       input: true
       pullup: true
     inverted: true
-    # KEIN allow_other_uses mehr: seit dem 28.08.2026 ist GPIO33 nur noch
-    # hier in Benutzung. Die Freigabe waere jetzt selbst ein
-    # Validierungsfehler. Kommt der binary_sensor zurueck, muss sie an
-    # BEIDEN Stellen wieder rein.
+    allow_other_uses: true      # Gegenstueck zum binary_sensor oben
   wakeup_pin_mode: KEEP_AWAKE
 
 # --- Ein laufendes OTA darf nicht in den Tiefschlaf fallen ---
