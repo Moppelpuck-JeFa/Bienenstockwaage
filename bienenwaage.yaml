@@ -74,17 +74,26 @@
 # vereinbarte Alarmzeichen fuer "noch nicht kalibriert" und steht
 # absichtlich weit weg vom Erwartungsbereich.
 #
-# Erwartet werden nach der Kalibrierung -18.000 bis -21.000 counts/kg
-# (zuletzt an diesen Zellen gemessen: -20.840 bzw. -20.755,9). Der
-# Erwartungsbereich gilt hier unveraendert, weil Waegezellen, Verkabelung
-# und Mechanik dieselben sind - der Kalibrierfaktor haengt an der
-# Bruecke und am HX711, nicht am Mikrocontroller.
+# Erwartet wird ein NEGATIVER Faktor in der Groessenordnung -10.000 bis
+# -30.000 counts/kg. Ein engerer Bereich laesst sich nicht angeben:
 #
-# OFFEN (Stand 28.08.2026): Nach der Kalibrierung auf dem neuen Board
-# steht der Faktor bei -14.081,15 und liegt damit AUSSERHALB dieses
-# Bereichs. Die Signatur "nur der Referenzpunkt gesetzt" ist es nicht -
-# die laege bei rund der Haelfte. Mit einem bekannten Gewicht
-# gegenpruefen: die Anzeige muss um dessen Masse steigen.
+#   -20.756  ESP8266-Aufbau (waage-eg)
+#   -14.081  ESP32-Board 2, nie mit bekanntem Gewicht gegengeprueft
+#   -24.356  ESP32-Board 3, am 30.08.2026 GEGENGEPRUEFT
+#
+# Die frueher hier notierte Annahme, der Faktor haenge nur an Bruecke und
+# HX711 und bleibe deshalb ueber einen Boardtausch gleich, traegt damit
+# nicht. Woran der Unterschied haengt, ist offen.
+#
+# DIE EIGENTLICHE PRUEFUNG IST DAS BEKANNTE GEWICHT, nicht der Faktor:
+# Pruefgewicht auflegen, die Anzeige muss dessen Masse zeigen. Am
+# 30.08.2026: 22,20 kg angezeigt bei 22,221 kg aufgelegt.
+#
+# WACHHALTEN WAEHREND DER KALIBRIERUNG. Die Prozedur braucht mit den
+# Wartezeiten gut drei Minuten, run_duration sind 200 s. Ohne Wachhalten
+# liegt zwischen Nullpunkt und Referenzpunkt ein Neustart, und heraus
+# kommt ein Faktor aus zwei verschiedenen Zustaenden - am 30.08.2026
+# zweimal passiert (+35.623 und -1.087.848).
 #
 # Ebenfalls pruefen: "Kalibriert bei" darf nicht leer sein, sonst fehlt
 # der Bezugspunkt und die Temperaturkompensation schaltet sich stumm ab.

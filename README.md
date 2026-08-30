@@ -25,6 +25,8 @@ weitere Stöcke ohne Code-Duplizierung dazukommen (siehe
 | [`docs/sessionbericht-2026-08-10.md`](docs/sessionbericht-2026-08-10.md) | Temperaturkompensation: Auswertung über 7 Tage und Einbau |
 | [`docs/sessionbericht-2026-08-11.md`](docs/sessionbericht-2026-08-11.md) | Mittelung der Rohwerte über das Messintervall, zwei neue Diagnose-Entities |
 | [`docs/sessionbericht-2026-08-12.md`](docs/sessionbericht-2026-08-12.md) | Plausibilitätsfenster gegen Ausreißer in der Langzeitstatistik |
+| [`docs/sessionbericht-2026-08-28.md`](docs/sessionbericht-2026-08-28.md) | Boardwechsel auf ESP32, Umbenennung in HA, Deep-Sleep-Fallstricke |
+| [`docs/sessionbericht-2026-08-30.md`](docs/sessionbericht-2026-08-30.md) | Dritter Boardtausch, Kalibrierung wiederhergestellt, Erwartungsbereich korrigiert |
 | [`tests/waage-temperatur-test.cpp`](tests/waage-temperatur-test.cpp) | Prüfprogramm für die Kompensationsformel (`g++`, ohne Hardware) |
 
 `secrets.yaml` selbst ist per `.gitignore` ausgeschlossen und gehört nicht ins Repo.
@@ -568,7 +570,7 @@ mehr Luft braucht — etwa für eine Driftmessung mit leerer, tarierter Waage, d
 |---|---|
 | 0 | Normalfall. Alles, was gemessen wurde, ist auch in HA. |
 | einzelne Werte, direkt nach dem Kalibrieren | Erwartbar: zwischen „Kalibrieren 0kg" und „Kalibrieren Referenzgewicht" stimmt der Span nicht. |
-| steigt im Takt des Messintervalls | Die Kalibrierung ist kaputt. Kalibrierfaktor prüfen (Erwartung −18.000 bis −21.000) und **beide** Schritte neu fahren. |
+| steigt im Takt des Messintervalls | Die Kalibrierung ist kaputt. Kalibrierfaktor prüfen (negativ, Größenordnung 10.000 bis 30.000) und **beide** Schritte neu fahren. |
 
 Der Zähler beginnt nach jedem Neustart wieder bei 0 und hat bewusst **keine**
 `state_class` — er ist kein Messwert und gehört nicht in die Langzeitstatistik.
@@ -646,15 +648,18 @@ unter "Diagnose" und werden bei jeder Messung aktualisiert.
 **1. "Waage eG Kalibrierfaktor"** — der wichtigste Wert. An diesem Aufbau
 gemessen: **−20.874 counts/kg** (Stand 10.08.2026).
 
-> Frühere Kalibrierungen dieses Aufbaus ergaben −17.900 und −20.840. Die
-> Streuung kommt von der Kalibrierung selbst, nicht von der Hardware; der
-> Erwartungsbereich für die Fehlersuche ist deshalb **−18.000 bis −21.000**.
+> **Achtung, dieser Bereich gilt nur für den ESP8266-Aufbau.** Frühere
+> Kalibrierungen dort ergaben −17.900, −20.840 und −20.874. Am ESP32 wurden
+> inzwischen −14.081 und **−24.356** gemessen. Für die Fehlersuche taugt
+> deshalb nur noch die Größenordnung: **negativ, −10.000 bis −30.000**.
+> Entschieden wird mit dem bekannten Gewicht, nicht mit dem Faktor.
 
 | Anzeige | Bedeutung |
 |---|---|
 | **exakt 3.500** | Eindeutig: die Kalibrierung ist auf die Platzhalter zurückgefallen. Neu kalibrieren. |
 | sehr groß (>100.000) | Beim Kalibrieren war der Span zu klein — Gewicht lag nicht auf, oder es wurde nicht ~1 min gewartet. Neu kalibrieren. |
-| ~±18.000 bis ±21.000 | Die Umrechnung ist in Ordnung, weiter bei Punkt 2. |
+| negativ, 10.000 bis 30.000 | Größenordnung plausibel — mit bekanntem Gewicht gegenprüfen, dann weiter bei Punkt 2. |
+| **positiv** | Nullpunkt und Referenzpunkt stammen aus verschiedenen Zuständen; meist lag ein Neustart dazwischen. Beide Schritte neu fahren, das Gerät dabei wach halten. |
 | rund die **Hälfte** des Erwartungswerts | Nur „Kalibrieren Referenzgewicht" gedrückt, der Nullpunkt fehlt. Erkennbar auch an leerem „Kalibriert bei". Beide Schritte fahren. |
 
 Der Wert **3.500** ist die schärfste Diagnose, weil er sich exakt aus den

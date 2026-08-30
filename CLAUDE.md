@@ -220,10 +220,23 @@ deshalb ist sie mit g++ testbar.
 
 ## Nach jedem Flash prüfen
 
-1. **Kalibrierfaktor** — Erwartungsbereich **−18.000 bis −21.000 counts/kg**
-   (der genaue Wert streut über Kalibrierungen hinweg). Exakt `3.500` heißt:
-   auf die Platzhalter zurückgefallen. Rund die Hälfte des Erwartungswerts
-   heißt: nur der Referenzpunkt wurde gesetzt, der Nullpunkt fehlt.
+1. **Kalibrierfaktor** — Größenordnung **−10.000 bis −30.000 counts/kg**,
+   und zwar **negativ**. Exakt `3.500` heißt: auf die Platzhalter
+   zurückgefallen. Rund die **Hälfte** des zuletzt gemessenen Werts heißt: nur
+   der Referenzpunkt wurde gesetzt, der Nullpunkt fehlt. **Positiv** oder
+   sechsstellig heißt: Nullpunkt und Referenzpunkt stammen aus verschiedenen
+   Zuständen — meist lag ein Neustart dazwischen.
+
+   > Der frühere enge Bereich −18.000 bis −21.000 stammte vom ESP8266-Aufbau
+   > und **gilt nicht mehr**. Gemessen wurden inzwischen −20.756 (ESP8266),
+   > −14.081 (ESP32-Board 2, nie gegengeprüft) und **−24.356** (ESP32-Board 3,
+   > am 30.08.2026 mit bekanntem Gewicht verifiziert). Der Faktor ist also nur
+   > ein Grobfilter.
+
+   **Die eigentliche Prüfung ist das bekannte Gewicht:** Prüfgewicht auflegen,
+   die Anzeige muss dessen Masse zeigen. Am 30.08.2026: 22,20 kg angezeigt bei
+   22,221 kg aufgelegt — 21 g Abweichung. Das ist der Beleg, den kein
+   Faktorbereich ersetzt.
 2. **„Kalibriert bei" darf nicht leer sein** — sonst fehlt der Bezugspunkt und
    die Temperaturkompensation schaltet sich stumm ab.
 
