@@ -254,15 +254,90 @@ USB-Flash bleibt möglich.
 Geprüft: `esphome config` gültig, und der Diff der aufgelösten Konfiguration
 enthält **null Entfernungen** — kein bestehender Eintrag hat sich bewegt.
 
-## 8. Offene Punkte
+## 8. Die Entities waren da — unter einem dritten Namensschema
+
+Nach dem Flash fehlten `Weckgrund`, `Bootnummer` **und**
+`Wachhalten (Schalter)` in Home Assistant. Zwei Vermutungen, beide falsch:
+
+1. „Nicht geflasht." Widerlegt — die Datei enthält `weckgrund`, und der
+   Nutzer hatte geflasht.
+2. „HA hat die Entity-Liste zwischengespeichert, weil sich die MAC geändert
+   hat." Widerlegt durch einen Reload des Config-Entry
+   (`homeassistant.reload_config_entry`): die Verbindung kam neu, die Liste
+   wurde frisch geholt — die Entities blieben verschwunden.
+
+### Nachgesehen statt geraten
+
+Der Diagnose-Dump der ESPHome-Integration
+(`ha_get_system_health(include="diagnostics", …)`, Pfad
+`data.storage_data`) zeigt genau, was HA vom Gerät bekommt:
+
+```
+device_info.compilation_time: "2026-08-30 14:58:04 +0200"
+sensor:      … {"object_id": "bootnummer", "name": "Bootnummer", …}
+text_sensor: … {"object_id": "weckgrund",  "name": "Weckgrund",  …}
+binary_sensor: … {"object_id": "wachhalten__schalter_", …}
+```
+
+**Alle drei waren die ganze Zeit da.** Nur nicht unter den IDs, die ich
+gesucht hatte.
+
+Aufgelöst über die unique_id — deren Format ist
+`{MAC}/0/{domain}/{Name}`, also z. B.
+`20:50:0D:D2:53:64/0/sensor/Bootnummer`:
+
+| tatsächliche entity_id | |
+|---|---|
+| `sensor.garten_bienenwaage_bootnummer` | 8 |
+| `sensor.garten_bienenwaage_weckgrund` | „Neustart" |
+| `binary_sensor.garten_bienenwaage_wachhalten_schalter` | `on` |
+
+### Das Präfix ist der Bereich
+
+`garten_`. Home Assistant leitet die entity_id neuer Entities aus
+**Bereich + Gerät + Entity** ab, wenn das Gerät einem Bereich zugeordnet ist
+— hier „Garten".
+
+Meine Vorhersage in Punkt 24 des Vorberichts lautete `stockwaage_*`, weil
+neue Entities die ID aus `geraete_name` bekämen. Das war für die
+Umbenennungen vom 28.08. richtig und für **neue** Entities falsch: Es gibt
+inzwischen ein drittes Schema, und es hängt am Bereich, nicht am Gerätenamen.
+
+Alle drei sind auf `bienenwaage_*` umbenannt. Die Kachel *Schalter am Gerät*
+im Dashboard (Punkt 20 des Vorberichts) zeigt damit wieder auf eine
+existierende Entity, und *Weckgrund* und *Bootnummer* stehen jetzt unter
+*Technik → Diagnose*.
+
+### Erste Werte
+
+- **Weckgrund: „Neustart"** — erwartungsgemäß, der Boot kam vom Flash bzw.
+  vom Reload, nicht aus dem Tiefschlaf.
+- **Bootnummer: 8** — der Zähler läuft und liegt in NVS.
+- **Wachhalten (Schalter): `on`** — der Kippschalter am Gehäuse ist an. Das
+  erklärt, warum das Gerät gerade durchgehend wach ist.
+
+Ab dem nächsten regulären Zyklus steht dort „Timer" bzw. „Schalter
+(GPIO33)", und die Bootnummer beantwortet, ob zwischen zwei Meldungen
+Wachphasen ohne Verbindung lagen.
+
+### Die Lehre
+
+**Eine Vorhersage über ein Namensschema ist keine Prüfung.** Zweimal in Folge
+habe ich hier eine ID geraten, statt sie über die unique_id aufzulösen —
+einmal mit `stockwaage_*`, einmal mit `bienenwaage_*`. Der Weg, der beide
+Male sofort funktioniert hätte:
+
+```
+ha_get_entity(entity_id=<eine bekannte Entity desselben Geräts>)   -> unique_id-Format lernen
+ha_get_entity(unique_id="{MAC}/0/{domain}/{Name}")                 -> die gesuchte ID
+```
+
+## 9. Offene Punkte
 
 - **Wachhalten wieder ausschalten**, sonst bleibt das Gerät wach. Ebenso den
   Kippschalter, falls er noch anliegt.
-- **Aktuelle Fassung flashen** — Onboard-LED (Punkt 7), Weckgrund und
-  Bootnummer. Stand 30.08. 15:00 ist keins davon auf dem Gerät: die Entities
-  `Weckgrund` und `Bootnummer` fehlen in HA, und sie stecken im selben
-  Firmware-Stand wie die LED. Danach die beiden Entities auf `bienenwaage_*`
-  umbenennen und erst dann aufs Dashboard nehmen.
+- ~~Aktuelle Fassung flashen.~~ **Erledigt** am 30.08.2026 14:58 (Punkt 8).
+  Entities umbenannt, Kacheln gesetzt.
 - ~~Nullpunkt klären.~~ **Erledigt** am 30.08.2026.
 - **Linearität prüfen** — die angekündigten 7 kg zusätzlich zum Prüfgewicht.
   Erwartung: 29,22 kg, Rohwert-Differenz ≈ 170.500 counts.

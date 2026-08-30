@@ -1526,6 +1526,13 @@ Umbenennungen vom 28.08. wirken nur auf die damals vorhandenen Entities.
 Sie sind danach in der Registry auf `bienenwaage_*` zu ziehen und erst dann
 aufs Dashboard zu nehmen — in dieser Reihenfolge, nicht umgekehrt.
 
+> **Die Vorhersage `stockwaage_*` war falsch.** Am 30.08.2026 hiessen die
+> neuen Entities `garten_bienenwaage_*`: Home Assistant leitet die ID neuer
+> Entities aus **Bereich + Geraet + Entity** ab, nicht aus `geraete_name`.
+> Siehe [`sessionbericht-2026-08-30.md`](sessionbericht-2026-08-30.md),
+> Punkt 8 — dort steht auch, wie man die ID ueber die unique_id aufloest,
+> statt sie zu raten.
+
 ## 25. Offene Punkte
 
 - **Kalibrierfaktor gegenprüfen.** −14.081,15 statt der erwarteten −18.000 bis
