@@ -473,15 +473,20 @@ hat sie mit erwischt — beim Einzellöschen wäre sie stehen geblieben.
 
 > **Entitäten löschen und Statistik löschen sind zwei verschiedene Dinge.**
 > Die Langzeitstatistik der sieben Reihen mit `state_class` hat das Entfernen
-> überlebt und liegt jetzt als verwaiste `statistic_id` vor —
-> `sensor.waage_eg_gewicht` mit der bereinigten Stockkurve vom 12.–18.08.
-> (Tagesmittel 34,3 bis 35,5 kg) sowie Rohwert, Streuung, Temperatur,
-> Temperatur-Mittel, WLAN-Signal und Betriebszeit. Absichtlich stehen
-> gelassen: die Gewichtskurve ist die erste Woche Stockgeschichte, und
-> Rohwert und Temperatur gehören zusammen — aus ihnen ließe sich der
-> Temperaturkoeffizient von Board 1 nachträglich bestimmen; eines von beiden
-> zu löschen macht das unmöglich. Chartbar bleiben sie über eine
-> `statistic-graph`-Karte mit der `statistic_id`.
+> überlebt und lag anschließend als verwaiste `statistic_id` vor.
+
+Von diesen sieben sind die drei reinen Diagnosereihen —
+`sensor.waage_eg_wlan_signal`, `sensor.waage_eg_betriebszeit` und
+`sensor.waage_eg_rohwert_streuung` — anschließend gelöscht worden. Sie
+beschreiben ausschließlich ein Board, das es nicht mehr gibt, und der Aufbau
+ist ohnehin noch Test, nicht Wirkbetrieb.
+
+Vier stehen weiter: `sensor.waage_eg_gewicht` mit der bereinigten Stockkurve
+vom 12.–18.08. (Tagesmittel 34,3 bis 35,5 kg), dazu Rohwert, Temperatur und
+Temperatur-Mittel. Rohwert und Temperatur gehören zusammen — aus ihnen ließe
+sich der Temperaturkoeffizient von Board 1 nachträglich bestimmen; eines von
+beiden zu löschen macht das unmöglich. Chartbar bleiben sie über eine
+`statistic-graph`-Karte mit der `statistic_id`.
 
 ## 11. Offene Punkte
 
