@@ -492,6 +492,17 @@ hilft an Board 3 nicht weiter.
 > Messreihe, kein Testartefakt — dann vor dem Löschen erst sichern
 > (die Zeilen auslesen, wie in Punkt 9 beschrieben).
 
+Zuletzt fiel noch `sensor.futtervorrat` (kg) auf — ebenfalls eine verwaiste
+`statistic_id` ohne Entity, deren Zugehörigkeit sich von außen nicht klären
+ließ. Sie gehört zum Projekt und ist mit gelöscht. Auch inhaltlich war sie
+hinüber: Monatsmittel 16,67 kg bei einem **Minimum von −19 kg** — ein
+negativer Futtervorrat ist keiner, das ist der Nachhall der kaputten
+Kalibrierungen.
+
+Damit ist von diesem Projekt keine verwaiste `statistic_id` mehr übrig; in der
+Statistik stehen nur noch die neun Reihen des aktiven Geräts
+(`sensor.bienenwaage_*`).
+
 ## 11. Offene Punkte
 
 - **Wachhalten wieder ausschalten**, sonst bleibt das Gerät wach. Ebenso den
