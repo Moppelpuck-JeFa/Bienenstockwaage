@@ -258,22 +258,29 @@ enthält **null Entfernungen** — kein bestehender Eintrag hat sich bewegt.
 
 - **Wachhalten wieder ausschalten**, sonst bleibt das Gerät wach. Ebenso den
   Kippschalter, falls er noch anliegt.
-- **Aktuelle Fassung flashen** — Weckgrund und Bootnummer, danach die beiden
-  Entities auf `bienenwaage_*` umbenennen und erst dann aufs Dashboard. Der
-  dringende Anlass ist mit Punkt 7 entfallen; als Diagnose bleiben sie
-  trotzdem sinnvoll.
-- **Nullpunkt klären** (Punkt 7): leere Waage zeigt −0,8 kg. Lag beim
-  Nullpunkt-Schritt etwas auf? Sonst tarieren.
+- **Aktuelle Fassung flashen** — Onboard-LED (Punkt 7), Weckgrund und
+  Bootnummer. Stand 30.08. 15:00 ist keins davon auf dem Gerät: die Entities
+  `Weckgrund` und `Bootnummer` fehlen in HA, und sie stecken im selben
+  Firmware-Stand wie die LED. Danach die beiden Entities auf `bienenwaage_*`
+  umbenennen und erst dann aufs Dashboard nehmen.
+- ~~Nullpunkt klären.~~ **Erledigt** am 30.08.2026.
 - **Linearität prüfen** — die angekündigten 7 kg zusätzlich zum Prüfgewicht.
   Erwartung: 29,22 kg, Rohwert-Differenz ≈ 170.500 counts.
 - **Messintervall von 20 min zurückstellen** — bei 20 min ist das Gerät 17 %
   der Zeit wach.
 - **`binary_sensor.bienenwaage_wachhalten_schalter` suchen** und ggf. umbenennen.
-- **FRITZ!Box aufräumen:** feste Lease für `20:50:0D:D2:53:64`, und die
-  Einträge der Boards 1 und 2 löschen. Zwei Hosts gleichen Namens sind die
-  Ursache der `.171`-Verwechslung.
-- **`device_tracker.bienenwaage`** (Board 2) ist die zweite Karteileiche in
-  HA — wie Board 1 deaktivieren.
+- ~~FRITZ!Box aufräumen.~~ **Erledigt** am 30.08.2026. Board 3 führt der Router
+  jetzt als `stockwaage`; in HA ist der Tracker
+  `device_tracker.stockwaage` (MAC `20:50:0D:D2:53:64`, `home`).
+- ~~`device_tracker.bienenwaage` (Board 2) deaktivieren.~~ **Erledigt** am
+  30.08.2026: Gerät deaktiviert und in „Stockwaage ALT (Board 2, bis
+  29.08.2026)" umbenannt, wie zuvor Board 1. Das aktive Gerät heißt jetzt
+  „Bienenwaage (FRITZ!Box, Board 3)".
+
+  > Zu beachten: Die Entity-IDs sind dabei irreführend geblieben — die
+  > **Leiche** heißt `device_tracker.bienenwaage`, das **aktive** Board
+  > `device_tracker.stockwaage`. Umbenennen wäre möglich, kostet aber die
+  > Historie des aktiven Trackers; die Gerätenamen sind eindeutig genug.
 - **Authentifizierungsfehler beim ersten Verbindungsversuch** nachgehen.
 - **Langzeitstatistik bereinigen.** Die Werte von 0,5 kg und die 22,2 kg des
   Prüfgewichts stehen dauerhaft drin (`state_class: measurement`).
