@@ -441,7 +441,49 @@ Kalibriersperre ergänzt:
 Der Schalter wurde **nicht** von sich aus gesetzt: der angekündigte
 Linearitätstest (+7 kg) braucht die Anzeige.
 
-## 10. Offene Punkte
+## 10. Die toten Entitäten von `waage-eg` entfernt
+
+Der ESP8266 ist seit dem 28.08. außer Betrieb, seine 24 Entitäten standen aber
+noch in der Registry und waren durchgehend `unavailable`. Entfernt wurden sie
+nicht einzeln, sondern über den **Config-Entry** des Geräts — damit gehen
+Gerät und Entitäten in einem Zug, und es bleibt kein Geräteeintrag ohne
+Entitäten zurück.
+
+| | tot | lebend |
+|---|---|---|
+| Gerät | Waage eG | Bienenwaage |
+| Modell | `d1_mini` | `esp32doit-devkit-v1` |
+| MAC | `8c:ce:4e:c9:e5:7f` | `20:50:0d:d2:53:64` |
+| Config-Entry | `01KYQMWSGPFDSSMVD6M20ME9NM` („Waage") | `01M08HH8349N52K2MR1RABCV3T` („Bienenwaage") |
+
+**Beide ESPHome-Einträge standen auf `loaded`** — auch der des seit zwei Tagen
+abgeschalteten Boards. Der Zustand taugt also nicht zur Unterscheidung; ein
+ESPHome-Eintrag bleibt „geladen", solange er die Verbindung erneut versucht.
+Zugeordnet wurde deshalb über Modell und MAC, nicht über den Titel: der tote
+Eintrag heißt „Waage", der lebende „Bienenwaage" — Namen, bei denen man sich
+leicht vergreift.
+
+Vor dem Löschen geprüft und jeweils ohne Treffer: Automationen, Skripte,
+Szenen, Helfer (`ha_search`, `config_total_matches: 0`) und sämtliche
+Storage-Dashboards (`ha_config_get_dashboard(mode="search")`).
+
+Die Suche nach `waage_eg` findet 23 Entitäten, das Gerät hatte aber **24**:
+`update.waage_firmware` trägt das Präfix nicht. Über den Config-Entry zu gehen
+hat sie mit erwischt — beim Einzellöschen wäre sie stehen geblieben.
+
+> **Entitäten löschen und Statistik löschen sind zwei verschiedene Dinge.**
+> Die Langzeitstatistik der sieben Reihen mit `state_class` hat das Entfernen
+> überlebt und liegt jetzt als verwaiste `statistic_id` vor —
+> `sensor.waage_eg_gewicht` mit der bereinigten Stockkurve vom 12.–18.08.
+> (Tagesmittel 34,3 bis 35,5 kg) sowie Rohwert, Streuung, Temperatur,
+> Temperatur-Mittel, WLAN-Signal und Betriebszeit. Absichtlich stehen
+> gelassen: die Gewichtskurve ist die erste Woche Stockgeschichte, und
+> Rohwert und Temperatur gehören zusammen — aus ihnen ließe sich der
+> Temperaturkoeffizient von Board 1 nachträglich bestimmen; eines von beiden
+> zu löschen macht das unmöglich. Chartbar bleiben sie über eine
+> `statistic-graph`-Karte mit der `statistic_id`.
+
+## 11. Offene Punkte
 
 - **Wachhalten wieder ausschalten**, sonst bleibt das Gerät wach. Ebenso den
   Kippschalter, falls er noch anliegt.

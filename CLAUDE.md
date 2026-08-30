@@ -13,7 +13,9 @@ ESPHome-Bienenstockwaage (ESP32 DOIT DevKit V1 + HX711 + 4 Wägezellen),
 angebunden an Home Assistant. **Ein Gerät läuft produktiv** — `bienenwaage.yaml`,
 in ESPHome und HA unter dem Gerätenamen `stockwaage` geführt.
 
-Seit dem 28.08.2026 ist es das einzige. Die ESP8266-Dateien `waage-eg.yaml`,
+Seit dem 28.08.2026 ist es das einzige; am 30.08.2026 sind auch Gerät und
+Entitäten von `waage-eg` aus Home Assistant entfernt (die Langzeitstatistik
+liegt noch als verwaiste `statistic_id` vor). Die ESP8266-Dateien `waage-eg.yaml`,
 `waage-stock2.yaml` und `waage-stock3.yaml` sind entfernt, ebenso der
 `esp8266:`-Block aus der Basis. `waage-eg-notes.md` und
 `waage-eg-claude-code-kontext.md` bleiben als **Archiv** stehen: die
@@ -192,6 +194,22 @@ Zeilen. `import_statistics` nimmt für eine echte `entity_id` die Quelle
 vorhandene Zeile mit ihren eigenen Werten überschreiben** — schlägt der Import
 fehl und wurde vorher gelöscht, ist die Reihe weg. Durchgeführt am 30.08.2026,
 Belege in `docs/sessionbericht-2026-08-30.md`, Punkt 9.
+
+**Ein ausgemustertes ESPHome-Gerät wird über seinen Config-Entry entfernt,
+nicht Entity für Entity.** Sonst bleibt ein Geräteeintrag ohne Entitäten
+zurück, und Entitäten ohne das übliche Präfix werden übersehen — bei `waage-eg`
+war das `update.waage_firmware`, das als einzige der 24 nicht `waage_eg` im
+Namen trug. Zwei Fallstricke dabei:
+
+- **Der Zustand `loaded` unterscheidet nicht.** Auch der Eintrag eines seit
+  Tagen abgeschalteten Boards steht auf `loaded`, solange ESPHome die
+  Verbindung erneut versucht. Zuordnen über Modell und MAC, nicht über den
+  Titel — die Titel („Waage" für das tote, „Bienenwaage" für das lebende
+  Gerät) laden zum Vergreifen ein.
+- **Entitäten löschen löscht die Statistik nicht mit.** Die Reihen mit
+  `state_class` bleiben als verwaiste `statistic_id` liegen. Das ist bei der
+  Gewichtskurve erwünscht und bei Diagnosewerten Müll — also hinterher
+  bewusst entscheiden, nicht vergessen.
 
 **Die Temperaturkompensation steht in `packages/waage-temperatur.h`** — genau
 einmal, weil sie an drei Stellen gebraucht wird (Gewicht, Tara,
