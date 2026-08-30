@@ -1537,7 +1537,7 @@ aufs Dashboard zu nehmen — in dieser Reihenfolge, nicht umgekehrt.
   Schalter weckt. Die Diagnose vom 28.08. war falsch.
 - ~~Weckt der Timer?~~ **Erledigt am 30.08.2026** — ja. Gemessen: 967 s Schlaf
   bei 1.000 s gesetzt (RC-Oszillator, 3,3 % Abweichung). Siehe
-  [`sessionbericht-2026-08-30.md`](sessionbericht-2026-08-30.md), Punkt 7.
+  [`sessionbericht-2026-08-30.md`](sessionbericht-2026-08-30.md), Punkt 6.
 - **Weckgrund und Bootnummer nach dem Flash umbenennen** auf `bienenwaage_*`
   und dann aufs Dashboard nehmen — in dieser Reihenfolge (Punkt 24).
 - ~~Den GPIO33-Test auswerten.~~ **Erledigt** (Punkt 20): Der `binary_sensor`

@@ -144,7 +144,7 @@ Namensfalle aus Punkt 24: der Registry-Eintrag war gelöscht, ein neu
 angelegter bekommt die ID aus `geraete_name`, also `stockwaage_*`. Noch nicht
 nachgesehen.
 
-## 7. Der Timer weckt — belegt
+## 6. Der Timer weckt — belegt
 
 Am Vormittag zum Testen `Messintervall` auf **20 min** gestellt. Die Änderung
 greift sofort: `bienenwaage.yaml` hängt an der Number ein
@@ -208,6 +208,51 @@ ist um diesen Betrag daneben und ein Tara ist fällig. Offen.
 > Zu beachten: −0,8 kg liegt noch im Plausibilitätsfenster (−1 bis 150 kg).
 > Driftet es weiter, wird das Gewicht verworfen und nur noch Rohwert,
 > Streuung und Temperatur gehen raus.
+
+## 7. Die Onboard-LED zeigt die WLAN-Verbindung
+
+Auf Wunsch dazugekommen. Die blaue LED des DevKit V1 sitzt fest an **GPIO2**;
+eine Alternative gibt es für sie nicht.
+
+| LED | Bedeutung |
+|---|---|
+| blitzt | Gerät ist wach **und** im WLAN |
+| aus | kein WLAN, oder das Gerät schläft |
+
+Im Tiefschlaf ist sie zwangsläufig dunkel: nur GPIO33 bekommt ein
+`gpio_hold_en()`, alle anderen Pads fallen auf Eingang zurück. Bei 200 s
+Wachzeit und 20 min Intervall blitzt sie rund 17 % der Zeit — genau das ist
+die Aussage.
+
+### Kurzer Blitz statt Blinken
+
+100 ms alle 2 s sind **5 % Einschaltdauer statt 50 %**. Die LED zieht über
+ihren Vorwiderstand ein paar Milliampere; für den geplanten Akkubetrieb ist
+der Unterschied nicht mehr egal. Erkennbar ist ein Blitz genauso gut — besser
+sogar, weil er sich vom Dauerlicht der Durchsicht-LED an GPIO18 klar
+unterscheidet.
+
+Die LED ist `internal: true`, also **keine HA-Entity**. Sie ist eine Anzeige
+am Gerät, kein Bedienelement — und das spart eine neue Entity, die nach dem
+Flash wieder `stockwaage_*` hieße und von Hand umzubenennen wäre (Punkt 5).
+
+### GPIO2 stand auf der Meideliste, und der Grund gilt weiter
+
+GPIO2 ist ein **Boot-Strapping-Pin**: Der ESP32 geht in den Download-Modus,
+wenn beim Reset GPIO0 LOW ist, und GPIO2 muss dabei LOW oder offen sein.
+
+Hier ist das vertretbar. Die Onboard-LED liegt über ihren Vorwiderstand gegen
+GND, zieht den Pin also nicht hoch, und beim Reset ist er ohnehin noch
+Eingang — die Firmware macht erst im `setup()` einen Ausgang daraus. Der
+USB-Flash bleibt möglich.
+
+> **Aber nicht folgenlos:** Manche DevKit-Nachbauten haben an GPIO2 einen
+> Pull-up. Auf so einem Board kann der USB-Flash nach dieser Änderung
+> fehlschlagen. **Sollte das je passieren, ist dieser Pin der erste
+> Verdächtige** — steht so auch im Kommentar an der Substitution.
+
+Geprüft: `esphome config` gültig, und der Diff der aufgelösten Konfiguration
+enthält **null Entfernungen** — kein bestehender Eintrag hat sich bewegt.
 
 ## 8. Offene Punkte
 

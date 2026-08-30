@@ -127,6 +127,7 @@ substitutions:
   # | DS18B20        | D5 (GPIO14)        | GPIO4        |
   # | Durchsicht-Taster | D2 (GPIO4)      | GPIO34       |
   # | Durchsicht-LED | D7 (GPIO13)        | GPIO18       |
+  # | Onboard-LED    | -                  | GPIO2        |
   #
   # Externe Beschaltung unveraendert uebernommen: Pull-up 4,7 kOhm vom
   # DS18B20-Datenpin gegen 3V3, Vorwiderstand 1 kOhm vor der LED.
@@ -134,10 +135,13 @@ substitutions:
   # liefert reichlich fuer HX711 samt Bruecke (~5,8 mA).
   #
   # Gemiedene Pins und der Grund dafuer:
-  #   GPIO0, 2, 5, 12, 15  Boot-Strapping, brauchen beim Start einen
+  #   GPIO0, 5, 12, 15     Boot-Strapping, brauchen beim Start einen
   #                        bestimmten Pegel (GPIO12 setzt sogar die
   #                        Flash-Spannung - genau der Pin, auf dem beim
   #                        ESP8266 DOUT lag)
+  #   GPIO2                ebenfalls Boot-Strapping - siehe pin_led_wlan
+  #                        weiter unten, wird seit dem 30.08.2026 bewusst
+  #                        fuer die Onboard-LED benutzt
   #   GPIO6-11             fest am SPI-Flash, nicht nutzbar
   #   GPIO1, 3             UART0, also Konsole und Flashen
   #   GPIO35, 36, 39       ebenfalls input-only, als Reserve freigehalten
@@ -211,6 +215,23 @@ substitutions:
   #
   # Geschlossen = LOW = wach.
   pin_wachhalten: GPIO33
+
+  # Die blaue Onboard-LED des DevKit V1. Sie zeigt eine aktive
+  # WLAN-Verbindung an - siehe den light/interval-Block weiter unten.
+  #
+  # GPIO2 IST EIN BOOT-STRAPPING-PIN und stand deshalb bisher auf der
+  # Meideliste. Hier ist das vertretbar, aber nicht folgenlos:
+  #
+  # Der ESP32 geht in den Download-Modus, wenn beim Reset GPIO0 LOW ist;
+  # GPIO2 muss dabei LOW oder offen sein. Die Onboard-LED liegt ueber
+  # ihren Vorwiderstand gegen GND, zieht den Pin also nicht hoch - und
+  # beim Reset ist er ohnehin noch Eingang, die Firmware macht erst im
+  # setup() einen Ausgang daraus. Der USB-Flash bleibt damit moeglich.
+  #
+  # ABER: manche DevKit-Nachbauten haben an GPIO2 einen Pull-up. Auf so
+  # einem Board kann der USB-Flash nach dieser Aenderung fehlschlagen.
+  # SOLLTE DAS JE PASSIEREN, IST DIESER PIN DER ERSTE VERDAECHTIGE.
+  pin_led_wlan: GPIO2
 
   # NUR NOCH RUECKFALLWERT. Die echte Schlafdauer kommt zur Laufzeit aus
   # der Number "Messintervall" - siehe Skript schlafdauer_koppeln weiter
@@ -855,6 +876,57 @@ switch:
 #
 # Das Einschwingen der MECHANIK ist davon unberuehrt - dafuer stehen die
 # 90 s in einschwingzeit, gemessen am Geraet.
+# =====================================================================
+# Onboard-LED: blinkt bei aktiver WLAN-Verbindung
+# =====================================================================
+# Auf Wunsch am 30.08.2026 dazugekommen. Die blaue LED des DevKit sitzt
+# fest an GPIO2 - eine Alternative gibt es fuer sie nicht.
+#
+# ABLESEN:
+#   blinkt   Geraet ist wach UND im WLAN
+#   aus      kein WLAN, oder das Geraet schlaeft
+#
+# Im Tiefschlaf ist sie zwangslaeufig dunkel: der Pin wird nicht gehalten
+# (nur GPIO33 bekommt ein gpio_hold_en), der Pad faellt also auf Eingang
+# zurueck und die LED verlischt. Bei 200 s Wachzeit und 20 min Intervall
+# blinkt sie damit rund 17 % der Zeit - genau das ist die Aussage.
+#
+# WARUM EIN KURZER BLITZ UND KEIN 50-PROZENT-BLINKEN:
+# 100 ms alle 2 s sind 5 % Einschaltdauer statt 50. Die LED zieht ueber
+# ihren Vorwiderstand ein paar Milliampere; im spaeteren Akkubetrieb ist
+# der Unterschied zwischen 5 % und 50 % davon nicht mehr egal. Erkennbar
+# ist ein Blitz genauso gut wie ein Blinken - besser sogar, weil er sich
+# vom Dauerlicht der Durchsicht-LED an GPIO18 klar unterscheidet.
+#
+# ABSCHALTEN: diesen Block und den interval-Eintrag darunter entfernen.
+# Die LED ist internal, haengt also an keiner HA-Entity.
+output:
+  - platform: gpio
+    id: led_wlan_out
+    pin: ${pin_led_wlan}
+
+light:
+  - platform: binary
+    id: led_wlan
+    output: led_wlan_out
+    # Keine HA-Entity: die LED ist eine Anzeige am Geraet, kein
+    # Bedienelement. Das spart ausserdem eine neue Entity, die nach dem
+    # Flash wieder stockwaage_* hiesse und von Hand umzubenennen waere.
+    internal: true
+
+interval:
+  - interval: 2s
+    then:
+      - if:
+          condition:
+            wifi.connected:
+          then:
+            - light.turn_on: led_wlan
+            - delay: 100ms
+            - light.turn_off: led_wlan
+          else:
+            - light.turn_off: led_wlan
+
 sensor:
   - id: !extend hx711_raw_counts
     update_interval: 150ms

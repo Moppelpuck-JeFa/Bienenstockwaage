@@ -40,6 +40,7 @@ weitere Stöcke ohne Code-Duplizierung dazukommen (siehe
 | DS18B20 Data | `D5` | 14 |
 | Durchsicht-Taster | `D2` | 4 |
 | Durchsicht-LED | `D7` | 13 |
+| Onboard-LED (WLAN-Anzeige, nur ESP32) | – | 2 |
 
 Der **Taster** liegt gegen GND und nutzt den internen Pull-up — kein externer
 Widerstand nötig. Die **LED** hängt über einen Vorwiderstand von **1 kΩ**
