@@ -13,9 +13,9 @@ ESPHome-Bienenstockwaage (ESP32 DOIT DevKit V1 + HX711 + 4 Wägezellen),
 angebunden an Home Assistant. **Ein Gerät läuft produktiv** — `bienenwaage.yaml`,
 in ESPHome und HA unter dem Gerätenamen `stockwaage` geführt.
 
-Seit dem 28.08.2026 ist es das einzige; am 30.08.2026 sind auch Gerät und
-Entitäten von `waage-eg` aus Home Assistant entfernt (die Langzeitstatistik
-liegt noch als verwaiste `statistic_id` vor). Die ESP8266-Dateien `waage-eg.yaml`,
+Seit dem 28.08.2026 ist es das einzige; am 30.08.2026 sind auch Gerät,
+Entitäten und Langzeitstatistik von `waage-eg` aus Home Assistant entfernt.
+Die ESP8266-Dateien `waage-eg.yaml`,
 `waage-stock2.yaml` und `waage-stock3.yaml` sind entfernt, ebenso der
 `esp8266:`-Block aus der Basis. `waage-eg-notes.md` und
 `waage-eg-claude-code-kontext.md` bleiben als **Archiv** stehen: die

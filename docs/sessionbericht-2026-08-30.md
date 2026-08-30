@@ -475,18 +475,22 @@ hat sie mit erwischt — beim Einzellöschen wäre sie stehen geblieben.
 > Die Langzeitstatistik der sieben Reihen mit `state_class` hat das Entfernen
 > überlebt und lag anschließend als verwaiste `statistic_id` vor.
 
-Von diesen sieben sind die drei reinen Diagnosereihen —
-`sensor.waage_eg_wlan_signal`, `sensor.waage_eg_betriebszeit` und
-`sensor.waage_eg_rohwert_streuung` — anschließend gelöscht worden. Sie
-beschreiben ausschließlich ein Board, das es nicht mehr gibt, und der Aufbau
-ist ohnehin noch Test, nicht Wirkbetrieb.
+Diese sieben sind anschließend in zwei Schritten gelöscht worden — erst die
+reinen Diagnosereihen (WLAN-Signal, Betriebszeit, Rohwert-Streuung), dann auf
+Ansage auch der Rest: Gewicht, Rohwert, Temperatur und Temperatur-Mittel.
+**Von `waage-eg` ist damit in Home Assistant nichts mehr übrig.**
 
-Vier stehen weiter: `sensor.waage_eg_gewicht` mit der bereinigten Stockkurve
-vom 12.–18.08. (Tagesmittel 34,3 bis 35,5 kg), dazu Rohwert, Temperatur und
-Temperatur-Mittel. Rohwert und Temperatur gehören zusammen — aus ihnen ließe
-sich der Temperaturkoeffizient von Board 1 nachträglich bestimmen; eines von
-beiden zu löschen macht das unmöglich. Chartbar bleiben sie über eine
-`statistic-graph`-Karte mit der `statistic_id`.
+Aufgehoben hätte man die Gewichtskurve vom 12.–18.08. (Tagesmittel 34,3 bis
+35,5 kg) und das Paar Rohwert/Temperatur, aus dem sich der
+Temperaturkoeffizient von Board 1 nachträglich bestimmen ließe. Beides ist
+verworfen worden, weil der Aufbau noch Test ist und nicht Wirkbetrieb: Board 1
+hatte den nie gegengeprüften Faktor −20.756, seine Kurve ist mit der von
+Board 3 ohnehin nicht vergleichbar, und ein Temperaturkoeffizient von Board 1
+hilft an Board 3 nicht weiter.
+
+> Für den Wirkbetrieb gilt das nicht mehr. Ab dann ist eine Gewichtsreihe
+> Messreihe, kein Testartefakt — dann vor dem Löschen erst sichern
+> (die Zeilen auslesen, wie in Punkt 9 beschrieben).
 
 ## 11. Offene Punkte
 
