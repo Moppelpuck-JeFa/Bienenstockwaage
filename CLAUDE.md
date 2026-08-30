@@ -174,6 +174,24 @@ falschen Messgegenstand. Daraus folgt:
   gegen Absicht.
 - Das Messfenster sammelt nicht, der Intervallzähler ruht. Beim Ablauf wird
   sofort veröffentlicht — wie beim Durchsicht-Nachlauf.
+- **Die Sperre deckt Minuten ab, nicht Stunden.** Vorgabe 10 Minuten — das
+  reicht gegen Vergessen unmittelbar nach Tara und Kalibrierung, nicht gegen
+  ein Prüfgewicht, das für einen Linearitätstest stundenlang liegen bleibt.
+  Dafür ist der **Durchsichtmodus** da. Wer länger als `kalibrier_sperre` mit
+  Prüfgewichten arbeitet, schaltet ihn vorher ein; sonst steht das Ergebnis
+  hinterher dauerhaft in der Langzeitstatistik. Am 30.08.2026 genau so
+  passiert und nachträglich repariert.
+
+**Falsche Werte aus der Langzeitstatistik zu entfernen geht nur über einen
+Umweg.** `recorder/clear_statistics` löscht immer eine *ganze* `statistic_id`,
+`recorder.purge_entities` ebenso; einen Zeitraum herauszuschneiden ist nicht
+vorgesehen. Der Weg ist: Stundenzeilen auslesen und sichern →
+`recorder/clear_statistics` → `recorder/import_statistics` mit nur den sauberen
+Zeilen. `import_statistics` nimmt für eine echte `entity_id` die Quelle
+`recorder`, ist also nicht auf externe Statistiken beschränkt. **Zuerst eine
+vorhandene Zeile mit ihren eigenen Werten überschreiben** — schlägt der Import
+fehl und wurde vorher gelöscht, ist die Reihe weg. Durchgeführt am 30.08.2026,
+Belege in `docs/sessionbericht-2026-08-30.md`, Punkt 9.
 
 **Die Temperaturkompensation steht in `packages/waage-temperatur.h`** — genau
 einmal, weil sie an drei Stellen gebraucht wird (Gewicht, Tara,

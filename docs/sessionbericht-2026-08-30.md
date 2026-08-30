@@ -332,7 +332,116 @@ ha_get_entity(entity_id=<eine bekannte Entity desselben Geräts>)   -> unique_id
 ha_get_entity(unique_id="{MAC}/0/{domain}/{Name}")                 -> die gesuchte ID
 ```
 
-## 9. Offene Punkte
+## 9. Langzeitstatistik bereinigt
+
+Ausgangslage: Das Messintervall steht wieder auf 60 min, und in der
+Langzeitstatistik standen die Werte des heutigen Vormittags — 0,5 kg aus der
+misslungenen Kalibrierung, −0,8 kg bei leerer Waage, 22,2/22,7/22,9 kg vom
+Prüfgewicht. Weil `waage_gewicht` `state_class: measurement` trägt, bleiben
+diese Stundenwerte **dauerhaft** stehen; der Zustandsverlauf fällt nach ~10
+Tagen weg, die Statistik nicht.
+
+### Der Trick: Home Assistant kann keinen Zeitraum löschen — aber neu schreiben
+
+`recorder/clear_statistics` löscht immer eine **ganze** `statistic_id`,
+`recorder.purge_entities` ebenso. Einen Bereich herauszuschneiden ist über die
+Oberfläche nicht vorgesehen. Der Ausweg ist zweistufig:
+
+1. alle Stundenzeilen auslesen und sichern,
+2. `recorder/clear_statistics`,
+3. `recorder/import_statistics` mit **nur den sauberen** Zeilen.
+
+`import_statistics` akzeptiert für eine `statistic_id` mit gültiger
+`entity_id` die Quelle `recorder` — es ist also nicht auf externe Statistiken
+beschränkt. Die zurückgeschriebenen Zahlen sind die von HA selbst berechneten,
+nichts wird erfunden; einzig `mean` wurde auf vier Nachkommastellen gerundet
+(0,1 mg).
+
+> **Vorher prüfen, ob der Rückweg funktioniert.** Erst eine bereits
+> vorhandene Zeile mit ihren eigenen Werten überschreiben (ein No-op), dann
+> löschen. Schlägt der Import fehl und ist vorher gelöscht, ist die Reihe weg.
+
+### Was entfernt wurde
+
+Verworfen wurden Stunden, deren `min` unter 26 kg oder deren `max` über 40 kg
+lag — das Band, in dem sich das Stockgewicht seit dem 12.08. bewegt.
+
+`sensor.bienenwaage_gewicht` (Board 2, 18.–29.08.), 273 → 263 Zeilen:
+
+| Stunde (UTC) | mean | min | max | Ursache |
+|---|---|---|---|---|
+| 18.08. 09:00 | 28,49 | 0 | 34,9 | Tara |
+| 18.08. 16:00 | 25,70 | −0,6 | 38,3 | Tara |
+| 18.08. 17:00 | 34,44 | −1,0 | 38,4 | Tara |
+| 24.08. 16:00 | 32,86 | −0,9 | 35,4 | Tara |
+| 24.08. 17:00 | 34,26 | −0,9 | 36,2 | Tara |
+| 30.08. 08:00 | 10,74 | 0,5 | 22,2 | Boardtausch, Kalibrierung |
+| 30.08. 09:00 | 8,51 | −0,8 | 22,7 | Kalibrierung, Prüfgewicht |
+| 30.08. 10:00 | −0,80 | −0,8 | −0,8 | leere Waage |
+| 30.08. 11:00 | 18,62 | −0,8 | 22,9 | Prüfgewicht |
+| 30.08. 12:00 | 22,90 | 22,9 | 22,9 | Prüfgewicht |
+
+`sensor.waage_eg_gewicht` (Board 1/ESP8266, 11.–18.08.), 156 → 145 Zeilen:
+der ganze 11.08. ab 19:00 UTC bis 12.08. 02:00 UTC — die flach auf 20,5 kg
+stehende Strecke der kaputten Kalibrierung — sowie 12.08. 17:00/18:00 und
+13.08. 18:00 (Tara, min 16,1 bzw. −1,0).
+
+Die Tagesmittel liegen jetzt durchgehend zwischen 30,7 und 36,2 kg; vorher zog
+der 30.08. das Tagesmittel auf 11,99 kg und der 11.08. auf 21,15 kg.
+
+### Sieben verwaiste statistic_ids gelöscht
+
+Aus den beiden früheren Umbenennungen waren `statistic_id`s stehen geblieben,
+zu denen **gar keine Entity mehr existiert** — sie tauchen nur noch unter
+Entwicklerwerkzeuge → Statistiken als Problem auf:
+
+`sensor.waage_waage_eg_gewicht`, `sensor.waage_waage_eg_betriebszeit`,
+`sensor.waage_eg_waage_eg_rohwert`, `sensor.waage_eg_waage_eg_temperatur`,
+`sensor.waage_eg_waage_tagesbilanz`,
+`sensor.waage_eg_waage_gewichtsverlust_kurz`,
+`sensor.waage_eg_waage_gewichtsanderung`.
+
+Ihr Inhalt war ohnehin unbrauchbar: die Tagesbilanz reichte von −2.265 bis
++3.784 kg pro Tag, die Gewichtsänderung von −140,8 bis +72,1 kg/d.
+
+### Was stehen geblieben ist, und warum
+
+- **Rohwert, Streuung, Temperatur** — nicht angefasst. Die Temperatur ist
+  unabhängig davon richtig, was auf der Waage liegt, und der Rohwert ist laut
+  harter Regel die Grundlage jeder Nachmessung des Temperaturkoeffizienten.
+  Nach einem Boardtausch ist er ohnehin nicht mit dem alten vergleichbar —
+  falsch ist er deshalb nicht.
+- **`sensor.bienenwaage_tagesbilanz`, `_gewichtsanderung`,
+  `_gewichtsverlust_kurz`** — hier ist nicht ein Zeitraum verdorben, sondern
+  die ganze Reihe. Auch an ruhigen Tagen stehen dort ±30 bis ±60 kg/d und
+  ±9 kg/h. Ursache sind die Lücken durch den Tiefschlaf: die Ableitung sieht
+  einen Sprung, wo nur eine Messpause war. Das ist ein Entwurfsproblem der
+  Helfer, kein Ausreißer — deshalb hier nicht gelöscht, sondern als offener
+  Punkt notiert.
+- **`sensor.futtervorrat`** — ebenfalls eine verwaiste `statistic_id` (kg,
+  ohne Entity). Nicht angefasst, weil nicht zweifelsfrei zu diesem Projekt
+  gehörig.
+
+### Die Bereinigung hält nur, wenn nichts Falsches mehr gesendet wird
+
+Zum Zeitpunkt der Bereinigung lag das Prüfgewicht noch auf der Waage
+(22,9 kg), das Gerät sendete weiter. **Jede weitere volle Stunde schreibt eine
+neue, ebenso falsche Zeile.** Daraus folgt eine Regel, die die bestehende
+Kalibriersperre ergänzt:
+
+> **Die Kalibriersperre deckt Minuten ab, nicht Stunden.** `kalibrier_sperre`
+> steht auf 10 Minuten und schützt gegen das Vergessen unmittelbar nach Tara
+> und Kalibrierung. Ein Prüfgewicht, das zum Linearitätstest stundenlang
+> liegen bleibt, überlebt sie mühelos. Dafür ist der **Durchsichtmodus**
+> zuständig (`switch.bienenwaage_durchsichtmodus`): er hält alles mit
+> `state_class` zurück, die Diagnose läuft weiter. Wer länger als
+> `kalibrier_sperre` mit Prüfgewichten arbeitet, schaltet ihn vorher ein —
+> sonst ist die Statistik hinterher wieder zu reparieren.
+
+Der Schalter wurde **nicht** von sich aus gesetzt: der angekündigte
+Linearitätstest (+7 kg) braucht die Anzeige.
+
+## 10. Offene Punkte
 
 - **Wachhalten wieder ausschalten**, sonst bleibt das Gerät wach. Ebenso den
   Kippschalter, falls er noch anliegt.
@@ -357,7 +466,16 @@ ha_get_entity(unique_id="{MAC}/0/{domain}/{Name}")                 -> die gesuch
   > `device_tracker.stockwaage`. Umbenennen wäre möglich, kostet aber die
   > Historie des aktiven Trackers; die Gerätenamen sind eindeutig genug.
 - **Authentifizierungsfehler beim ersten Verbindungsversuch** nachgehen.
-- **Langzeitstatistik bereinigen.** Die Werte von 0,5 kg und die 22,2 kg des
-  Prüfgewichts stehen dauerhaft drin (`state_class: measurement`).
-  Entwicklerwerkzeuge → Statistiken.
+- ~~Langzeitstatistik bereinigen.~~ **Erledigt** am 30.08.2026 (Punkt 9).
+  Die Gewichtsreihe ist in beiden Hälften sauber, sieben verwaiste
+  `statistic_id`s sind weg.
+
+  > Nachzuholen, sobald das Prüfgewicht herunter ist: die Stunden ab
+  > 30.08. 13:00 UTC, die seither weiterlaufen. Beim nächsten Mal vorher den
+  > **Durchsichtmodus** einschalten, dann entfällt das.
+- **Tagesbilanz, Gewichtsänderung und Gewichtsverlust überarbeiten.** Ihre
+  Langzeitstatistik ist über den gesamten Zeitraum unbrauchbar (±30 bis
+  ±60 kg/d an ruhigen Tagen), weil die Ableitungen die Tiefschlaf-Lücken für
+  Sprünge halten. Erst den Helfer reparieren, dann die Statistik löschen —
+  andersherum ist sie sofort wieder voll.
 - **Funkstrecke** — unverändert der wichtigste Hebel.
