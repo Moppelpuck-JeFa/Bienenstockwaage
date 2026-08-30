@@ -144,12 +144,85 @@ Namensfalle aus Punkt 24: der Registry-Eintrag war gelöscht, ein neu
 angelegter bekommt die ID aus `geraete_name`, also `stockwaage_*`. Noch nicht
 nachgesehen.
 
-## 6. Offene Punkte
+## 7. Der Timer weckt — belegt
+
+Am Vormittag zum Testen `Messintervall` auf **20 min** gestellt. Die Änderung
+greift sofort: `bienenwaage.yaml` hängt an der Number ein
+`on_value: script.execute: schlafdauer_koppeln`. Schlafdauer damit
+1.200 − 200 = **1.000 s**.
+
+### Der erste Versuch war verunreinigt
+
+| Zeit | |
+|---|---|
+| 11:15:25 | eingeschlafen |
+| **11:23:01** | Boot — **456 s** später |
+
+456 s passt zu keiner gesetzten Schlafdauer, weder zu 1.000 s noch zum
+vorherigen Wert von 3.400 s. Zu dieser Zeit wurde am Gerät hantiert
+(Prüfgewicht abgeräumt); der Kippschalter an GPIO33 löst ext0 aus. Der
+Weckvorgang beweist damit nichts über den Timer.
+
+### Der zweite Versuch, ohne Eingriff
+
+| | |
+|---|---|
+| Eingeschlafen | 11:26:16 |
+| Wachphase davor | 11:23:01 → 11:26:16 = **195 s** (`run_duration` 200 s ✓) |
+| **Boot** | **11:42:23** |
+| Erwartet | 11:42:56 |
+
+**Gemessene Schlafdauer: 967 s bei 1.000 s gesetzt** — 3,3 % zu kurz.
+
+Das ist keine Fehlfunktion, sondern der interne RC-Oszillator, aus dem der
+ESP32 im Tiefschlaf seine Zeit nimmt; ein paar Prozent Abweichung sind dort
+normal. Für ein Messintervall ohne Sekundenanspruch ist das ohne Belang —
+wer es genau braucht, müsste den RTC gegen einen Quarz kalibrieren.
+
+**Damit ist die Frage aus Punkt 24 des Vorberichts beantwortet: der Timer
+weckt.** Zusammen mit dem ext0-Nachweis vom 29.08. (Punkt 24, Abschnitt „Der
+Schalter weckt") funktionieren **beide** Weckpfade.
+
+Was daraus für die verpassten Weckfenster der Vortage folgt: Der Tiefschlaf
+war nie die Ursache. Übrig bleiben die Funkstrecke und der
+Authentifizierungsfehler beim ersten Verbindungsversuch (Punkt 4).
+
+### Nebenbefund: die Waage ist leer, und der Nullpunkt sitzt 0,77 kg daneben
+
+| Zeit | Rohwert | Gewicht |
+|---|---|---|
+| 11:15 | −569.561 | 22,7 kg |
+| 11:24 | +2.508 | −0,7 kg |
+| 11:43 | +2.506 | −0,8 kg |
+
+Die Last ist komplett herunter — rund 572.000 counts Sprung. Die
+angekündigten 7 kg liegen (noch) nicht auf, eine Linearitätsprüfung steht
+also weiterhin aus.
+
+Erklärungsbedürftig ist der Rest: **die leere Waage zeigt −0,8 kg statt 0.**
+Der Nullpunkt aus der Kalibrierung lag bei ≈ −16.300 counts, leer misst sie
++2.506 — 0,77 kg Differenz. Entweder lag beim Schritt „Kalibrieren 0 kg" noch
+etwas auf, das jetzt weg ist (dann ist alles konsistent), oder der Nullpunkt
+ist um diesen Betrag daneben und ein Tara ist fällig. Offen.
+
+> Zu beachten: −0,8 kg liegt noch im Plausibilitätsfenster (−1 bis 150 kg).
+> Driftet es weiter, wird das Gewicht verworfen und nur noch Rohwert,
+> Streuung und Temperatur gehen raus.
+
+## 8. Offene Punkte
 
 - **Wachhalten wieder ausschalten**, sonst bleibt das Gerät wach. Ebenso den
   Kippschalter, falls er noch anliegt.
 - **Aktuelle Fassung flashen** — Weckgrund und Bootnummer, danach die beiden
-  Entities auf `bienenwaage_*` umbenennen und erst dann aufs Dashboard.
+  Entities auf `bienenwaage_*` umbenennen und erst dann aufs Dashboard. Der
+  dringende Anlass ist mit Punkt 7 entfallen; als Diagnose bleiben sie
+  trotzdem sinnvoll.
+- **Nullpunkt klären** (Punkt 7): leere Waage zeigt −0,8 kg. Lag beim
+  Nullpunkt-Schritt etwas auf? Sonst tarieren.
+- **Linearität prüfen** — die angekündigten 7 kg zusätzlich zum Prüfgewicht.
+  Erwartung: 29,22 kg, Rohwert-Differenz ≈ 170.500 counts.
+- **Messintervall von 20 min zurückstellen** — bei 20 min ist das Gerät 17 %
+  der Zeit wach.
 - **`binary_sensor.bienenwaage_wachhalten_schalter` suchen** und ggf. umbenennen.
 - **FRITZ!Box aufräumen:** feste Lease für `20:50:0D:D2:53:64`, und die
   Einträge der Boards 1 und 2 löschen. Zwei Hosts gleichen Namens sind die
