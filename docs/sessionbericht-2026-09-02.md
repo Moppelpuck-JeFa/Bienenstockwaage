@@ -34,15 +34,25 @@ config_hash=…)`), die Iframe-Karten sind raus.
 
 | Abschnitt | Karten |
 |---|---|
-| Außentemperatur | `history-graph` 48 h (Temperatur, Taupunkt, Gefühlt) · `statistics-graph` 30 Tage Min/Mittel/Max |
-| Innentemperaturen | `history-graph` 48 h (Küche, Schlafzimmer, Nähzimmer, Flur unten, Bad unten) · `statistics-graph` 30 Tage Tagesmittel |
-| Feuchte, Druck, Wind | je ein `history-graph` 48 h für rel. Feuchte, Barometer, Wind (Mittel + Spitze) |
-| Bienenstockwaage | `history-graph` 48 h (Gewicht + Stocktemperatur) · `statistics-graph` 90 Tage Tagesmittel · Tile „Tagesbilanz" mit `trend-graph` über 7 Tage |
+| Außentemperatur | `statistics-graph` 48 h Min/Mittel/Max (Stundenwerte) · `statistics-graph` 30 Tage Min/Mittel/Max · `history-graph` 48 h Taupunkt und Gefühlt |
+| Innentemperaturen | `statistics-graph` 48 h Stundenmittel (Küche, Schlafzimmer, Nähzimmer, Flur unten, Bad unten) · dieselben fünf als 30-Tage-Tagesmittel |
+| Feuchte, Druck, Wind | `statistics-graph` 48 h Feuchte Min/Mittel/Max · `statistics-graph` 48 h Wind Mittel/Max · `history-graph` 48 h Barometer |
+| Bienenstockwaage | `statistics-graph` 48 h Gewicht (Stundenmittel) · `statistics-graph` 90 Tage Gewicht (Tagesmittel) · `statistics-graph` 48 h Stocktemperatur Min/Mittel/Max · Tile „Tagesbilanz" mit `trend-graph` über 7 Tage |
 
-**Unteransicht `energie`:** `history-graph` 24 h (Hausverbrauch, PV-Leistung,
-Nachteinspeisung, Akku-Ladeleistung), `history-graph` 48 h Akkuspannung,
-`statistics-graph` 30 Tage Hausverbrauch (Mittel und Maximum). Zusätzlich
+**Unteransicht `energie`:** `statistics-graph` 24 h Stundenmittel (Hausverbrauch,
+Nachteinspeisung, Akku-Ladeleistung), `statistics-graph` 30 Tage Hausverbrauch
+Min/Mittel/Max, `history-graph` 48 h PV-Leistung und Akkuspannung. Zusätzlich
 `back_path` auf `/lovelace/diagramme`.
+
+**Warum überall `statistics-graph`:** Der `history-graph` zeichnet den
+Rohverlauf und wird dadurch stufig und verrauscht. `statistics-graph` zeichnet
+aggregierte Werte als weiche Kurve, mit `min`/`mean`/`max` zusätzlich als Band —
+das ist der Stil, der gewünscht war. Für 48-h-Karten steht deshalb
+`period: hour` mit `days_to_show: 2`, für die Langzeitkarten `period: day`.
+
+**Nur drei Karten sind noch `history-graph`** — Taupunkt/Gefühlt, Barometer und
+PV-Leistung/Akkuspannung. Diesen Sensoren fehlt `state_class`, sie haben also
+gar keine Langzeitstatistik, aus der ein `statistics-graph` zeichnen könnte.
 
 ## Was dabei zu beachten ist
 
@@ -55,9 +65,14 @@ Nachteinspeisung, Akku-Ladeleistung), `history-graph` 48 h Akkuspannung,
   `sensor.bienenwaage_temperaturkorrektur`. Für diese Werte steht deshalb ein
   `history-graph` in der Karte — der zieht aus dem Recorder und braucht kein
   `state_class`, reicht aber nur bis zur Purge-Grenze (~10 Tage) zurück.
-- **Wer eine dieser Karten auf einen längeren Zeitraum stellen will, muss
-  zuerst dem Sensor ein `state_class` geben** — sonst bleibt der Graph leer,
-  ohne Fehlermeldung.
+- **Wer eine dieser Karten auf `statistics-graph` oder einen längeren Zeitraum
+  umstellen will, muss zuerst dem Sensor ein `state_class` geben** — sonst
+  bleibt der Graph leer, ohne Fehlermeldung. Die Statistik beginnt dann
+  allerdings erst ab dem Zeitpunkt der Umstellung; rückwirkend entsteht nichts.
+- **`statistics-graph` ignoriert die pro-Entity gesetzte `color`, sobald mehr
+  als ein `stat_type` gezeigt wird** — Min/Mittel/Max kommen immer in der
+  Blau-Palette. Nur bei `stat_types: ['mean']` schlägt die eigene Farbe durch;
+  deshalb sind die Raumtemperaturen farbig und die Bandkarten blau.
 - Die Langzeitstatistik des Stockgewichts beginnt erst am 19.08.; das 90-Tage-
   Diagramm ist entsprechend links leer.
 
@@ -70,9 +85,12 @@ Nachteinspeisung, Akku-Ladeleistung), `history-graph` 48 h Akkuspannung,
    werden, entscheidet der Abgleich aus Punkt 1.
 3. `sensor.pv_leistung_momentan` stand beim Bau auf `unknown` — in der
    Energie-Karte fehlt die Serie dann.
-4. In „Außen 48 h" und „Luftfeuchte 48 h" stehen senkrechte Ausreißer
-   (Sensoraussetzer des WeatherMan), die vorher in Grafana vermutlich
-   weggefiltert waren.
+4. Die Sensoraussetzer des WeatherMan (senkrechte Ausreißer auf 0 bzw. −20)
+   stehen jetzt als Ausschläge im Min-Band von „Außen 48 h" und „Luftfeuchte
+   48 h" und in „Taupunkt und Gefühlt 48 h". In Grafana waren sie vermutlich
+   weggefiltert. Ein `filter`-Helfer (Outlier) wäre der Bordmittel-Weg dagegen.
+5. „Gewicht 48 h" hat eine sehr enge y-Achse (~0,1 kg Spanne), weil das Gewicht
+   im Fenster kaum schwankt — jedes Rauschen sieht dort dramatisch aus.
 
 ## Werkzeugnotizen
 
