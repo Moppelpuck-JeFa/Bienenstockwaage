@@ -40,9 +40,30 @@ config_hash=…)`), die Iframe-Karten sind raus.
 | Bienenstockwaage | `statistics-graph` 48 h Gewicht (Stundenmittel) · `statistics-graph` 90 Tage Gewicht (Tagesmittel) · `statistics-graph` 48 h Stocktemperatur Min/Mittel/Max · Tile „Tagesbilanz" mit `trend-graph` über 7 Tage |
 
 **Unteransicht `energie`:** `statistics-graph` 24 h Stundenmittel (Hausverbrauch,
-Nachteinspeisung, Akku-Ladeleistung), `statistics-graph` 30 Tage Hausverbrauch
-Min/Mittel/Max, `history-graph` 48 h PV-Leistung und Akkuspannung. Zusätzlich
-`back_path` auf `/lovelace/diagramme`.
+PV-Leistung, Nachteinspeisung, Akku-Ladeleistung), `statistics-graph` 30 Tage
+Hausverbrauch Min/Mittel/Max, `history-graph` 48 h PV-Leistung und Akkuspannung
+als Rohverlauf. Zusätzlich `back_path` auf `/lovelace/diagramme`.
+
+**Die PV-Serie in „Leistung 24 h" bleibt leer, solange
+`sensor.pv_leistung_momentan` kein `state_class` hat.** Der Sensor kommt aus
+YAML (kein Helfer, kein Config-Flow), und über ha-mcp ist er nicht erreichbar:
+`ha_config_set_yaml` ist in dieser Installation nicht freigeschaltet, die
+File-Editor-API antwortet außerhalb einer Browser-Session mit HTTP 420
+„Policy not fulfilled". Die zwei Zeilen sind deshalb von Hand in
+`configuration.yaml` einzutragen:
+
+```yaml
+homeassistant:
+  customize:
+    sensor.pv_leistung_momentan:
+      state_class: measurement
+      device_class: power
+```
+
+Danach „Kernkonfiguration neu laden" (oder `ha_reload_core(target="core")`).
+Die Statistik beginnt ab diesem Zeitpunkt; rückwirkend entsteht nichts. Sobald
+sie läuft, kann die Roh-Karte auf die Akkuspannung allein zusammengestrichen
+werden.
 
 **Warum überall `statistics-graph`:** Der `history-graph` zeichnet den
 Rohverlauf und wird dadurch stufig und verrauscht. `statistics-graph` zeichnet
